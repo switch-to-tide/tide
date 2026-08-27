@@ -76,8 +76,8 @@ class App(object):
         self.plus_span = None
         self.tab_scrolls = {'editor': 0, 'terminal': 0}
         self.tab_arrows = []
-        self._tab_metrics = (0, 1)
-        self._shown_tab = None
+        self._tab_metrics = {}
+        self._shown_tab = {}
         self._file_cache = None
         self.rects = {}
         for p in paths:
@@ -191,6 +191,7 @@ class App(object):
             if same:
                 self.active = i
                 self.focus = 'editor'
+                self.main_view = 'editor'      # the file half, not the shell
                 self.recheck_disk_soon()
                 self.need_render = True
                 return ed
@@ -210,6 +211,7 @@ class App(object):
             self.editors.append(ed)
             self.active = len(self.editors) - 1
         self.focus = 'editor'
+        self.main_view = 'editor'
         self.need_render = True
         if doc.readonly:
             self.status('%s is not valid UTF-8 - opened read-only' % self.rel(path))
@@ -747,18 +749,21 @@ class App(object):
         scr.fill(rect.x, rect.y, rect.w, 1, bg=theme.PANEL)
         self.toggle_spans = []
         x = rect.x + 1
-        count = ' %d' % len(self.big_terms) if self.big_terms else ''
-        for view, label in (('editor', '  Editor  '),
-                            ('terminal', '  Terminals%s  ' % count)):
-            active = self.main_view == view
-            bg = theme.STATUS_ACC if active else theme.PANEL_ALT
-            fg = theme.STATUS_FG if active else theme.FG_DIM
-            if x < rect.x2:
-                scr.fill(x, rect.y, min(len(label), rect.x2 - x), 1, bg=bg)
-                scr.put(x, rect.y, label, fg=fg, bg=bg, attr=BOLD if active else 0,
-                        max_x=rect.x2)
-            self.toggle_spans.append((x, x + len(label), view))
-            x += len(label) + 1
+        if not self.split_active():
+            # in split view both sets of tabs are on screen, so there is
+            # nothing to switch between
+            count = ' %d' % len(self.big_terms) if self.big_terms else ''
+            for view, label in (('editor', '  Editor  '),
+                                ('terminal', '  Terminals%s  ' % count)):
+                active = self.main_view == view
+                bg = theme.STATUS_ACC if active else theme.PANEL_ALT
+                fg = theme.STATUS_FG if active else theme.FG_DIM
+                if x < rect.x2:
+                    scr.fill(x, rect.y, min(len(label), rect.x2 - x), 1, bg=bg)
+                    scr.put(x, rect.y, label, fg=fg, bg=bg,
+                            attr=BOLD if active else 0, max_x=rect.x2)
+                self.toggle_spans.append((x, x + len(label), view))
+                x += len(label) + 1
         # a clickable way in to the settings, for keyboards where f9 is awkward
         chip = ' settings '
         self.settings_span = None
@@ -797,14 +802,29 @@ class App(object):
             scr.put(cx - len(hint), rect.y, hint, fg=theme.FG_DIM, bg=theme.PANEL)
 
     def render_tabs(self, scr, rect):
-        """Tabs for whatever the switch selected, cropped and scrollable."""
+        """The tab row: one strip normally, one per half in split view."""
         scr.fill(rect.x, rect.y, rect.w, 1, bg=theme.TAB_BG)
         self.tab_spans = []
         self.tab_close_spans = []
         self.tab_arrows = []
         self.plus_span = None
-        terminals = self.main_is_terminal()
-        strip = 'terminal' if terminals else 'editor'
+        divider = self.rects.get('divider')
+        if self.split_active() and divider is not None:
+            self._render_strip(scr, Rect(rect.x, rect.y, divider - rect.x, 1), 'editor')
+            self._render_strip(scr, Rect(divider + 1, rect.y, rect.x2 - divider - 1, 1),
+                               'terminal')
+            scr.fill(divider, rect.y, 1, 1, bg=theme.PANEL)
+            scr.put(divider, rect.y, '|', fg=theme.BORDER, bg=theme.PANEL)
+        else:
+            self._render_strip(
+                scr, rect, 'terminal' if self.main_is_terminal() else 'editor')
+
+    def _render_strip(self, scr, rect, strip):
+        """One row of tabs, cropped to its own space and scrollable."""
+        if rect.w < 4:
+            return
+        terminals = strip == 'terminal'
+        focused = self.main_is_terminal() == terminals
         if terminals:
             names = [t.title for t in self.big_terms]
             active_i = self.big_active
@@ -819,13 +839,13 @@ class App(object):
         plus = ' + ' if terminals else ''
         total = sum(widths) + len(plus)
         avail = max(1, rect.w)
-        self._tab_metrics = (total, avail)
+        self._tab_metrics[strip] = (total, avail)
         scroll = self.tab_scrolls.get(strip, 0)
         max_scroll = max(0, total - avail)
         # reveal the active tab when it changes, but leave a strip the user has
         # scrolled by hand where they put it
-        if widths and self._shown_tab != (strip, active_i):
-            self._shown_tab = (strip, active_i)
+        if widths and self._shown_tab.get(strip) != active_i:
+            self._shown_tab[strip] = active_i
             acc = sum(widths[:active_i])
             if acc < scroll:
                 scroll = acc
@@ -839,6 +859,8 @@ class App(object):
             active = i == active_i
             bg = theme.TAB_ACTIVE_BG if active else theme.TAB_BG
             fg = theme.TAB_ACTIVE_FG if active else theme.TAB_FG
+            if active and not focused:
+                fg = theme.FG_DIM          # the half that does not have the keyboard
             left = max(rect.x, tx)
             if tx + widths[i] > rect.x and tx < rect.x2:
                 scr.fill(left, rect.y, min(tx + widths[i], rect.x2) - left, 1, bg=bg)
@@ -851,8 +873,12 @@ class App(object):
                 if rect.x <= close_x < rect.x2:
                     scr.put(close_x, rect.y, 'x',
                             fg=theme.FG if active else theme.FG_DIM, bg=bg)
-                    self.tab_close_spans.append((close_x, i))
-            self.tab_spans.append((tx, tx + widths[i], i))
+                    self.tab_close_spans.append((close_x, i, strip))
+            # only claim clicks inside this strip, or a tab overflowing past
+            # the divider would swallow the other half's
+            x1, x2 = max(tx, rect.x), min(tx + widths[i], rect.x2)
+            if x2 > x1:
+                self.tab_spans.append((x1, x2, i, strip))
             tx += widths[i]
         if plus and rect.x <= tx and tx + len(plus) <= rect.x2:
             scr.fill(tx, rect.y, len(plus), 1, bg=theme.PANEL_ALT)
@@ -861,16 +887,22 @@ class App(object):
         # arrows at the edges, when there is more than fits
         if scroll > 0:
             scr.put(rect.x, rect.y, '<', fg=theme.FG, bg=theme.PANEL_ALT, attr=BOLD)
-            self.tab_arrows.append((rect.x, -1))
+            self.tab_arrows.append((rect.x, -1, strip))
         if scroll < max_scroll:
-            scr.put(rect.x2 - 1, rect.y, '>', fg=theme.FG, bg=theme.PANEL_ALT,
-                    attr=BOLD)
-            self.tab_arrows.append((rect.x2 - 1, 1))
+            scr.put(rect.x2 - 1, rect.y, '>', fg=theme.FG, bg=theme.PANEL_ALT, attr=BOLD)
+            self.tab_arrows.append((rect.x2 - 1, 1, strip))
 
-    def scroll_tabs(self, direction, step=8):
-        """Slide the tab strip sideways, the way VS Code's wheel does."""
-        total, avail = self._tab_metrics
-        strip = 'terminal' if self.main_is_terminal() else 'editor'
+    def strip_at(self, x):
+        """Which set of tabs sits under this column."""
+        divider = self.rects.get('divider')
+        if self.split_active() and divider is not None:
+            return 'editor' if x < divider else 'terminal'
+        return 'terminal' if self.main_is_terminal() else 'editor'
+
+    def scroll_tabs(self, direction, step=8, strip=None):
+        """Slide one tab strip sideways, the way VS Code's wheel does."""
+        strip = strip or ('terminal' if self.main_is_terminal() else 'editor')
+        total, avail = self._tab_metrics.get(strip, (0, 1))
         limit = max(0, total - avail)
         self.tab_scrolls[strip] = max(0, min(limit, self.tab_scrolls.get(strip, 0)
                                              + direction * step))
@@ -1248,9 +1280,9 @@ class App(object):
             if ev.kind == 'press':
                 self._click_tab_bar(ev)
             elif ev.kind in ('wheel_up', 'wheel_left'):
-                self.scroll_tabs(-1)
+                self.scroll_tabs(-1, strip=self.strip_at(ev.x))
             elif ev.kind in ('wheel_down', 'wheel_right'):
-                self.scroll_tabs(1)
+                self.scroll_tabs(1, strip=self.strip_at(ev.x))
             return
         if r['split'] is not None and r['split'].contains(ev.x, ev.y):
             term = self.big_term()
@@ -1296,33 +1328,36 @@ class App(object):
                     self.show_editor_view()
                 return
 
-    def _close_index(self, i):
-        if self.main_is_terminal():
+    def _close_index(self, i, strip=None):
+        strip = strip or ('terminal' if self.main_is_terminal() else 'editor')
+        if strip == 'terminal':
             self.close_big_terminal(i)
         else:
             self.close_tab(i)
 
     def _click_tab_bar(self, ev):
-        for x, direction in self.tab_arrows:
+        for x, direction, strip in self.tab_arrows:
             if ev.x == x:
-                self.scroll_tabs(direction, step=16)
+                self.scroll_tabs(direction, step=16, strip=strip)
                 return
         if self.plus_span and self.plus_span[0] <= ev.x < self.plus_span[1]:
             self.new_big_terminal()
             return
-        for close_x, i in self.tab_close_spans:
+        for close_x, i, strip in self.tab_close_spans:
             if ev.x == close_x:
-                self._close_index(i)
+                self._close_index(i, strip)
                 return
-        for x1, x2, i in self.tab_spans:
+        for x1, x2, i, strip in self.tab_spans:
             if x1 <= ev.x < x2:
                 if ev.button == 1:          # middle-click also closes
-                    self._close_index(i)
-                elif self.main_is_terminal():
+                    self._close_index(i, strip)
+                elif strip == 'terminal':
                     self.big_active = i
+                    self.main_view = 'terminal'
                     self.focus = 'editor'
                 else:
                     self.active = i
+                    self.main_view = 'editor'
                     self.focus = 'editor'
                     self.recheck_disk_soon()
                 return

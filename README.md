@@ -158,10 +158,11 @@ Requires Python 3.7+ and a terminal that speaks xterm mouse reporting
 
 **Split view**
 - `f5` (or the **Split view** row in the settings) puts one file editor and one
-  full-size terminal side by side, instead of switching between them. Both tab
-  strips stay: the `Editor` / `Terminals` switch (or `f2`) chooses which strip
-  you are looking at and which half has the keyboard, and clicking in a half
-  does the same.
+  full-size terminal side by side, instead of switching between them. The tab
+  row splits with them: file tabs over the left half, terminal tabs over the
+  right, a divider between, each scrolling on its own. The `Editor` /
+  `Terminals` switch disappears, since both are already on screen; `f2`, a
+  click on a tab, or a click in a half moves the keyboard between them.
 - With split view on and no terminal open, the editor keeps the whole pane and
   a small `</>` appears in the top right; click it (or press `f4`) to start a
   shell on the right. Close the last terminal and the editor takes the space

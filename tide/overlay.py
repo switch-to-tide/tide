@@ -416,8 +416,9 @@ HELP_TEXT = [
         ('mouse wheel', 'scrollback (stays put as output arrives)'),
     ]),
     ('Full-size terminals', [
-        ('f2', 'switch main area: editor <-> terminal'),
-        ('Editor / Terminals', 'the same switch, in the row above the tabs'),
+        ('f5', 'split view: a file and a shell side by side'),
+        ('f2', 'in split view, move between the two halves'),
+        ('Editor / Terminals', 'the switch above the tabs, in single view'),
         ('f4  or  click +', 'new full-size session'),
         ('alt+left / alt+right', 'previous / next session'),
         ('click x, or exit', 'close a session'),

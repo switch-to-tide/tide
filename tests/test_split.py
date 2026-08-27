@@ -294,6 +294,73 @@ class TestSplitInTheUI(unittest.TestCase):
         self.s.pump(0.6)
         self.assertIn('TYPED ', self.s.line(4), 'typing did not reach the file')
 
+    def test_both_sets_of_tabs_are_on_screen(self):
+        self.s.key(F5)
+        self.s.pump(0.6)
+        self.s.key(ESC + 'OS')                    # f4: a shell on the right
+        self.s.pump(1.2)
+        row = self.tabs()
+        self.assertIn('code.py', row, 'the file tabs are missing')
+        self.assertIn('terminal 1', row, 'the terminal tabs are missing')
+        self.assertIn('|', row, 'no separator between the two strips')
+        top = self.s.line(0)[26:]
+        self.assertNotIn('Editor', top, 'the switch is still there in split view')
+        self.assertNotIn('Terminals', top)
+
+    def test_the_separator_lines_up_with_the_panes(self):
+        self.s.key(F5)
+        self.s.pump(0.6)
+        self.s.key(ESC + 'OS')
+        self.s.pump(1.2)
+        row = self.s.line(self.s.TAB_ROW)
+        column = row.index('|', 26)
+        self.assertEqual(self.s.cell(column, 5)[2], 236,
+                         'the divider below sits somewhere else')
+
+    def test_clicking_either_strip_moves_the_keyboard(self):
+        self.s.key(F5)
+        self.s.pump(0.6)
+        self.s.key(ESC + 'OS')
+        self.s.pump(1.2)
+        column = 26 + self.tabs().index('code.py')   # the tab, not the explorer
+        self.s.click(column + 1, self.s.TAB_ROW)
+        self.s.pump(0.4)
+        self.s.type('TYPED ')
+        self.s.pump(0.4)
+        self.assertIn('TYPED ', self.s.screen(), 'the file half did not take it')
+        column = 26 + self.tabs().index('terminal 1')
+        self.s.click(column + 2, self.s.TAB_ROW)
+        self.s.pump(0.4)
+        self.s.type('echo FROM_THE_TAB' + ENTER)
+        self.assertTrue(self.s.wait_for('FROM_THE_TAB'),
+                        'the shell half did not take it')
+
+    def test_each_strip_scrolls_inside_its_own_half(self):
+        names = ('one_long_name.py', 'two_long_name.py', 'three_long_name.py',
+                 'four_long_name.py', 'five_long_name.py')
+        for name in names:
+            with open(os.path.join(self.tmp, name), 'w') as f:
+                f.write('x = 1\n')
+        time.sleep(2.2)                     # let quick open notice them
+        self.s.pump(0.5)
+        for name in names:
+            self.s.key(CTRL('p'))
+            self.s.type(name.split('_')[0])
+            self.s.key(ENTER)
+            self.s.pump(0.4)
+        self.s.key(F5)
+        self.s.pump(0.6)
+        self.s.key(ESC + 'OS')
+        self.s.pump(1.2)
+        row = self.s.line(self.s.TAB_ROW)
+        column = row.index('|', 26)
+        right_before = row[column:]
+        self.s.wheel(column - 10, self.s.TAB_ROW, up=False, times=3)
+        self.s.pump(0.4)
+        after = self.s.line(self.s.TAB_ROW)
+        self.assertNotEqual(after[26:column], row[26:column], 'the left strip is stuck')
+        self.assertEqual(after[column:], right_before, 'the right strip moved too')
+
     def test_f2_moves_between_the_halves_without_changing_the_layout(self):
         self.s.key(F5)
         self.s.pump(0.6)
