@@ -1,0 +1,129 @@
+"""Global preferences, kept in one JSON file so they follow you between repos."""
+
+import io
+import json
+import os
+
+DEFAULTS = {
+    'theme': 'dark',
+    'autosave': True,
+    'autosave_delay': 0.8,
+    'max_lines': 20000,
+    'max_mb': 2.0,
+    'show_terminal': True,
+    'split_view': False,
+    'show_tree': True,
+    'tab_width': 4,
+}
+
+# key, label, the values it cycles through
+FIELDS = [
+    ('theme', 'Theme', ['dark', 'midnight', 'ember', 'light']),
+    ('autosave', 'Auto-save', [True, False]),
+    ('autosave_delay', 'Auto-save after', [0.3, 0.5, 0.8, 1.0, 2.0, 5.0]),
+    ('max_lines', 'Ask above lines', [2000, 5000, 20000, 100000]),
+    ('max_mb', 'Ask above size', [0.5, 1.0, 2.0, 5.0, 20.0]),
+    ('show_terminal', 'Terminal panel', [True, False]),
+    ('split_view', 'Split view', [True, False]),
+    ('show_tree', 'Explorer', [True, False]),
+    ('tab_width', 'Indent width', [2, 4, 8]),
+]
+
+HINTS = {
+    'theme': 'colours for the whole app',
+    'autosave': 'save shortly after you type',
+    'autosave_delay': 'seconds of quiet before saving',
+    'max_lines': 'longer files ask first',
+    'max_mb': 'bigger files ask first',
+    'show_terminal': 'bottom panel, at startup',
+    'split_view': 'editor and terminal side by side',
+    'show_tree': 'file explorer, at startup',
+    'tab_width': 'when a file has none to copy',
+}
+
+
+def config_path():
+    base = os.environ.get('TIDE_CONFIG_HOME') or os.environ.get('XDG_CONFIG_HOME')
+    if not base:
+        base = os.path.join(os.path.expanduser('~'), '.config')
+    return os.path.join(base, 'tide', 'settings.json')
+
+
+CHOICES = dict((key, options) for key, _label, options in FIELDS)
+
+# hand-edited values do not have to be one of the offered choices, but they
+# do have to be sane
+LIMITS = {
+    'autosave_delay': (0.1, 30.0),
+    'max_lines': (100, 10000000),
+    'max_mb': (0.01, 2000.0),
+    'tab_width': (1, 16),
+}
+
+
+def _coerce(key, value):
+    """Keep a hand-edited file from breaking the app."""
+    default = DEFAULTS[key]
+    try:
+        if isinstance(default, bool):
+            return bool(value)
+        if isinstance(default, float):
+            value = float(value)
+        elif isinstance(default, int):
+            value = int(value)
+        else:
+            value = str(value)
+    except (TypeError, ValueError):
+        return default
+    if isinstance(default, str):
+        return value if value in CHOICES.get(key, [value]) else default
+    low, high = LIMITS.get(key, (None, None))
+    if low is not None:
+        value = max(low, min(high, value))
+    return value
+
+
+def load(path=None):
+    values = dict(DEFAULTS)
+    path = path or config_path()
+    try:
+        with io.open(path, 'r', encoding='utf-8') as f:
+            stored = json.load(f)
+    except Exception:
+        return values                      # missing or malformed: use defaults
+    if not isinstance(stored, dict):
+        return values
+    for key in DEFAULTS:
+        if key in stored:
+            values[key] = _coerce(key, stored[key])
+    return values
+
+
+def save(values, path=None):
+    path = path or config_path()
+    keep = dict((k, values[k]) for k in DEFAULTS if k in values)
+    try:
+        directory = os.path.dirname(path)
+        if directory and not os.path.isdir(directory):
+            os.makedirs(directory)
+        tmp = path + '.tmp'
+        with io.open(tmp, 'w', encoding='utf-8') as f:
+            f.write(json.dumps(keep, indent=2, sort_keys=True))
+            f.write(u'\n')
+        os.replace(tmp, path)
+        return True
+    except Exception:
+        return False
+
+
+def show(key, value):
+    """How a value is written in the settings panel."""
+    if isinstance(value, bool):
+        return 'on' if value else 'off'
+    if key == 'max_mb':
+        return ('%g MB' % value)
+    if key == 'autosave_delay':
+        return ('%gs' % value)
+    if key == 'max_lines':
+        return '{:,}'.format(value).replace(',', ' ')
+    return str(value)

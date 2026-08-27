@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "terminal-ide"
+description = "A terminal IDE: mouse-driven editor, file explorer and real shells in one TUI."
+readme = "README.md"
+requires-python = ">=3.7"
+license = { file = "LICENSE" }
+keywords = ["terminal", "editor", "ide", "tui", "console"]
+dynamic = ["version"]
+dependencies = []          # standard library only, on purpose
+
+classifiers = [
+    "Environment :: Console :: Curses",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: Text Editors",
+]
+
+[project.urls]
+Homepage = "https://github.com/switch-to-tide/tide"
+Source = "https://github.com/switch-to-tide/tide"
+
+[project.scripts]
+tide = "tide.cli:main"
+terminal-ide = "tide.cli:main"
+
+[tool.setuptools]
+packages = ["tide"]
+
+[tool.setuptools.dynamic]
+version = { attr = "tide.__version__" }

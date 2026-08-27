@@ -1,0 +1,1466 @@
+"""The IDE shell: layout, focus, tabs, event loop."""
+
+import os
+import select
+import signal
+import sys
+import time
+
+from . import settings as settings_store
+from . import theme
+from .buffer import Document, StaleFileError
+from .editor import Editor
+from .diff import DiffView, buffer_source, disk_source, head_source, rev_source
+from .filetree import FileTree, IGNORE_DIRS, IGNORE_FILES
+from .git import Git
+from .keys import ALT, CTRL, SHIFT, Decoder, Key, Mouse, Paste
+from .overlay import Confirm, Help, Prompt, SettingsPanel
+from .term import BOLD, DIM, RawTerminal, Rect, Screen
+from .termpanel import TerminalPanel
+
+SIDEBAR_W = 26
+MESSAGE_SECONDS = 6          # how long a status message stays on the bar
+MIN_TERM_H = 3
+DEFAULT_TERM_H = 12
+
+
+class App(object):
+    def __init__(self, root='.', paths=(), out=None, in_fd=None):
+        self.root = os.path.abspath(root)
+        self.settings = settings_store.load()
+        theme.apply(self.settings['theme'])
+        self.out = out or sys.stdout
+        self.in_fd = in_fd if in_fd is not None else sys.stdin.fileno()
+        self.editors = []
+        self.active = 0
+        self.git = Git(self.root)
+        self.tree = FileTree(self, self.root)
+        self.terminal = TerminalPanel(self, cwd=self.root)
+        self.big_terms = []          # full-size terminal sessions
+        self.big_active = 0
+        self.main_view = 'editor'    # in single view, what the main area shows;
+                                     # in split view, which half has the focus
+        self.split = self.settings.get('split_view', False)
+        self._next_tab_id = 0
+        self._view_state = {}        # view mode -> {tab id: what it was showing}
+        self._term_seq = 0
+        self.show_tree = self.settings['show_tree']
+        self.show_term = self.settings['show_terminal']
+        self.autosave = self.settings['autosave']
+        self.autosave_delay = self.settings['autosave_delay']
+        self.default_tab_width = self.settings['tab_width']
+        self.max_file_bytes = int(self.settings['max_mb'] * 1024 * 1024)
+        self.max_file_lines = self.settings['max_lines']
+        self.watch_interval = 0.7    # how often open files are checked on disk
+        self.tree_interval = 2.0
+        self._last_watch = 0.0
+        self._last_tree_refresh = 0.0
+        self.term_h = DEFAULT_TERM_H
+        self.term_h_user_set = False
+        self.focus = 'editor'
+        self.overlay = None
+        self.message = ''
+        self.message_time = 0
+        self.running = True
+        self.screen = Screen(80, 24)
+        self.decoder = Decoder()
+        self.need_render = True
+        self.resized = False
+        self.mouse_capture = None
+        self.tab_spans = []
+        self.tab_close_spans = []
+        self.toggle_spans = []
+        self.settings_span = None
+        self.new_term_span = None
+        self.diff_spans = []
+        self.plus_span = None
+        self.tab_scrolls = {'editor': 0, 'terminal': 0}
+        self.tab_arrows = []
+        self._tab_metrics = (0, 1)
+        self._shown_tab = None
+        self._file_cache = None
+        self.rects = {}
+        for p in paths:
+            self.open_file(p)
+        if not self.editors:
+            self.new_file()
+
+    # ---------------- tabs ----------------
+    def adopt(self, tab):
+        """Give a tab a lasting id, so it can be found again after a change."""
+        self._next_tab_id += 1
+        tab.tab_id = self._next_tab_id
+        return tab
+
+    def viewports(self):
+        """What each tab is looking at, by tab id: editors, diffs and shells."""
+        state = {}
+        for tab in list(self.editors) + list(self.big_terms):
+            if getattr(tab, 'is_diff', False):
+                state[tab.tab_id] = ('diff', tab.top, dict(tab.cols), tab.side)
+            elif hasattr(tab, 'doc'):
+                state[tab.tab_id] = ('editor', tab.top, tab.left)
+            else:
+                state[tab.tab_id] = ('terminal', tab.scroll)
+        return state
+
+    def restore_viewports(self, state):
+        if not state:
+            return
+        for tab in list(self.editors) + list(self.big_terms):
+            saved = state.get(getattr(tab, 'tab_id', None))
+            if not saved:
+                continue
+            if saved[0] == 'diff' and getattr(tab, 'is_diff', False):
+                tab.top = saved[1]
+                tab.cols.update(saved[2])
+                tab.side = saved[3]
+            elif saved[0] == 'editor' and hasattr(tab, 'doc'):
+                tab.top, tab.left = saved[1], saved[2]
+            elif saved[0] == 'terminal' and hasattr(tab, 'scroll'):
+                tab.scroll = min(saved[1], len(tab.vt.scrollback))
+
+    # ---------------- documents ----------------
+    @property
+    def editor(self):
+        return self.editors[self.active] if self.editors else None
+
+    def new_file(self):
+        ed = self.adopt(Editor(self, Document()))
+        self.editors.append(ed)
+        self.active = len(self.editors) - 1
+        self.focus = 'editor'
+        self.need_render = True
+        return ed
+
+    def _open_guard(self, path):
+        """Why opening this file might be a bad idea, or None if it is fine."""
+        if os.path.exists(path) and not os.path.isfile(path):
+            return None                   # handled before we get here
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            return None
+        name = os.path.basename(path)
+        if size > self.max_file_bytes:
+            return '%s is %.1f MB' % (name, size / 1048576.0)
+        try:
+            with open(path, 'rb') as f:
+                head = f.read(8192)
+                rest = f.read()
+        except OSError:
+            return None
+        if b'\x00' in head:
+            return '%s looks like a binary file' % name
+        lines = (head + rest).count(b'\n') + 1
+        if lines > self.max_file_lines:
+            return '%s has %d lines' % (name, lines)
+        return None
+
+    def open_file(self, path, force=False):
+        path = os.path.abspath(path)
+        if os.path.isdir(path):
+            self.status('%s is a directory' % path)
+            return None
+        if os.path.exists(path) and not os.path.isfile(path):
+            # pipes, sockets and device nodes: reading one would hang us
+            self.status('%s is not a regular file' % os.path.basename(path))
+            return None
+        if not force:
+            reason = self._open_guard(path)
+            if reason:
+                self.overlay = Confirm(
+                    '%s. Open anyway (it may be slow)?' % reason,
+                    lambda: self.open_file(path, force=True),
+                    on_no=lambda: self.status('Did not open %s'
+                                              % os.path.basename(path)))
+                self.need_render = True
+                return None
+        real = os.path.realpath(path)
+        try:
+            st = os.stat(path)
+            key = (st.st_dev, st.st_ino)
+        except OSError:
+            key = None
+        for i, ed in enumerate(self.editors):
+            # the filesystem decides what counts as the same file, so a link or
+            # a differently cased path cannot open a second buffer for it
+            same = ed.path and os.path.realpath(ed.path) == real
+            if not same and key is not None and hasattr(ed.doc, 'file_key'):
+                same = ed.doc.file_key() == key
+            if same:
+                self.active = i
+                self.focus = 'editor'
+                self.recheck_disk_soon()
+                self.need_render = True
+                return ed
+        try:
+            doc = Document(path)
+        except Exception as exc:
+            self.status('Cannot open %s: %s' % (os.path.basename(path), exc))
+            return None
+        ed = self.adopt(Editor(self, doc))
+        # replace a pristine untitled tab
+        cur = self.editor
+        if (cur and cur.path is None and not cur.doc.dirty
+                and cur.doc.text() == '' and len(self.editors) == 1):
+            self.editors[0] = ed
+            self.active = 0
+        else:
+            self.editors.append(ed)
+            self.active = len(self.editors) - 1
+        self.focus = 'editor'
+        self.need_render = True
+        if doc.readonly:
+            self.status('%s is not valid UTF-8 - opened read-only' % self.rel(path))
+        else:
+            self.status('Opened %s' % self.rel(path))
+        return ed
+
+    def rel(self, path):
+        """A path relative to the project, for showing in the status bar."""
+        if not path:
+            return 'untitled'
+        for root in (self.root, os.path.realpath(self.root)):
+            try:
+                # /tmp and /var are symlinks on macOS, so try the real root too
+                short = os.path.relpath(os.path.realpath(path), root)
+            except ValueError:
+                continue
+            if not short.startswith('..'):
+                return short
+        try:
+            short = os.path.relpath(path, self.root)
+        except ValueError:
+            return path
+        return path if short.startswith('..') else short
+
+    def close_tab(self, index=None):
+        index = self.active if index is None else index
+        if not self.editors:
+            return
+        ed = self.editors[index]
+        if (ed.doc.dirty and self.autosave and ed.doc.path
+                and not ed.doc.autosave_blocked and not ed.doc.readonly):
+            try:
+                ed.doc.save()             # auto-save owns it; just write it
+            except Exception as exc:
+                self.status('Save failed: %s' % exc)
+        if ed.doc.dirty:
+            def do_save():
+                if self.save(ed):
+                    self._remove_tab(index)
+            self.overlay = Confirm('Save %s before closing?' % ed.title, do_save,
+                                   on_no=lambda: self._remove_tab(index))
+            return
+        self._remove_tab(index)
+
+    def _remove_tab(self, index):
+        del self.editors[index]
+        if not self.editors:
+            self.new_file()
+        self.active = max(0, min(self.active if index > self.active else self.active - 1,
+                                 len(self.editors) - 1))
+        self.need_render = True
+
+    def save(self, ed=None, path=None, force=False):
+        ed = ed or self.editor
+        if ed is None:
+            return False
+        if ed.is_diff:
+            self.status('%s is a read-only diff' % ed.title)
+            return False
+        target = path or ed.doc.path
+        if not target:
+            self.prompt_save_as(ed)
+            return False
+        if (not force and not ed.doc.dirty and target == ed.doc.path
+                and not ed.doc.disk_missing and not ed.doc.autosave_blocked):
+            self.status('%s is already saved' % self.rel(target))
+            return True                      # nothing to write, like VS Code
+        try:
+            ed.doc.save(target, force=force)
+        except StaleFileError:
+            self.overlay = Confirm(
+                '%s changed on disk. Overwrite it with your version?' % ed.title,
+                lambda: self.save(ed, path, force=True),
+                on_no=lambda: self.status('Not saved - the file on disk is newer'),
+                extra=('d', 'd to diff', lambda: self.open_conflict_diff(ed)))
+            self.need_render = True
+            return False
+        except Exception as exc:
+            self.status('Save failed: %s' % exc)
+            return False
+        ed.hl = ed.hl.for_path(target)
+        ed.states.hl = ed.hl
+        ed.states.invalidate_from(0)
+        self.status('Saved %s' % self.rel(target))
+        self.tree.refresh()
+        self._file_cache = None
+        return True
+
+    def autosave_tick(self):
+        """Write any file that has been sitting modified and idle."""
+        if not self.autosave:
+            return
+        now = time.time()
+        for ed in self.editors:
+            doc = ed.doc
+            if not doc.dirty or not doc.path or doc.autosave_blocked or doc.readonly:
+                continue
+            if now - doc.changed_at < self.autosave_delay:
+                continue
+            try:
+                doc.save()
+            except StaleFileError:
+                doc.autosave_blocked = True   # the watcher will ask about it
+            except Exception as exc:
+                doc.autosave_blocked = True   # do not retry every keystroke
+                self.status('Auto-save failed for %s: %s (ctrl+s to retry)'
+                            % (self.rel(doc.path), exc))
+            self.need_render = True
+
+    def autosave_flush(self):
+        """Write everything auto-save owns right now (on quit, for instance)."""
+        if not self.autosave:
+            return
+        for ed in self.editors:
+            doc = ed.doc
+            if doc.dirty and doc.path and not doc.autosave_blocked and not doc.readonly:
+                try:
+                    doc.save()
+                except Exception:
+                    doc.autosave_blocked = True
+
+    # ---------------- keeping up with the filesystem ----------------
+    def recheck_disk_soon(self):
+        """Look at the files again on the next tick (after a tab switch, say)."""
+        self._last_watch = 0.0
+
+    def check_disk_changes(self, force=False):
+        """Notice files that something else - a terminal, a tool - rewrote."""
+        now = time.time()
+        if not force and now - self._last_watch < self.watch_interval:
+            return
+        self._last_watch = now
+        for index, ed in enumerate(self.editors):
+            try:
+                self._check_one_file(index, ed)
+            except Exception as exc:
+                # a file going strange must never take the editor down
+                ed.doc.autosave_blocked = True
+                self.status('Cannot follow %s: %s' % (self.rel(ed.doc.path), exc))
+                self.need_render = True
+        self._refresh_tree_if_due(now)
+
+    def _check_one_file(self, index, ed):
+        doc = ed.doc
+        if not doc.path:
+            return
+        state = doc.disk_status()
+        if state == 'missing':
+            if not doc.disk_missing:
+                doc.disk_missing = True
+                doc.autosave_blocked = True       # do not resurrect it silently
+                self.status('%s was deleted on disk (ctrl+s writes it back)'
+                            % self.rel(doc.path))
+                self.need_render = True
+            return
+        doc.disk_missing = False
+        if state != 'changed':
+            return
+        if doc.dirty:
+            self._resolve_conflict(index, ed)
+            return
+        size = doc.disk_size()
+        if size > self.max_file_bytes:
+            if not doc.autosave_blocked:
+                doc.autosave_blocked = True
+                shown = ('%.1f MB' % (size / 1048576.0) if size >= 1048576
+                         else '%d KB' % max(1, size // 1024))
+                self.status('%s grew to %s on disk - not reloading it'
+                            % (self.rel(doc.path), shown))
+                self.need_render = True
+            return
+        doc.reload()
+        ed.ensure_visible()
+        self.status('Reloaded %s (changed on disk)' % self.rel(doc.path))
+        self.need_render = True
+
+    def _resolve_conflict(self, index, ed):
+        """The file moved under us while the buffer had unsaved edits."""
+        doc = ed.doc
+        doc.autosave_blocked = True        # never overwrite it behind their back
+        if getattr(doc, 'conflict_ack_stamp', None) == doc.disk_state():
+            return                         # already answered for this version
+        if self.overlay is not None or index != self.active or self.main_view != 'editor':
+            return                         # ask when they are looking at that tab
+
+        def take_disk():
+            doc.reload()
+            ed.ensure_visible()
+            doc.autosave_blocked = False
+            self.status('Reloaded %s from disk' % self.rel(doc.path))
+
+        def keep_mine():
+            doc.stamp_disk()               # stop asking; this buffer is the truth
+            doc.autosave_blocked = False
+            doc.changed_at = time.time()
+            self.status('Kept your version of %s' % self.rel(doc.path))
+
+        self.overlay = Confirm(
+            '%s changed on disk. Reload and lose your unsaved edits?' % ed.title,
+            take_disk, on_no=keep_mine, on_cancel=keep_mine,
+            extra=('d', 'd to diff', lambda: self.open_conflict_diff(ed)))
+        self.need_render = True
+
+    def refresh_git(self):
+        """Keep the explorer letters and the editor change bars current."""
+        if not self.git.enabled:
+            return
+        branch = self.git.branch
+        if self.git.refresh():                  # self throttling
+            self.git.line_cache.clear()         # a commit or checkout landed
+            self.need_render = True
+        if self.git.branch != branch:           # a checkout with a clean tree
+            self.need_render = True
+        ed = self.editor
+        if ed is None or not ed.doc.path:
+            return
+        marks = self.git.line_status(ed.doc.path, ed.doc.disk_stamp)
+        if marks is not ed.git_marks:
+            ed.git_marks = marks
+            self.need_render = True
+
+    def _refresh_tree_if_due(self, now):
+        if now - self._last_tree_refresh < self.tree_interval:
+            return
+        self._last_tree_refresh = now
+        if not self.show_tree:
+            return
+        before = [e.path for e in self.tree.entries]
+        self.tree.refresh()
+        if [e.path for e in self.tree.entries] != before:
+            self._file_cache = None        # quick-open should see new files
+            self.need_render = True
+
+    # ---------------- preferences ----------------
+    def set_setting(self, key, value):
+        """Change one preference, apply it now and remember it for next time."""
+        if self.settings.get(key) == value:
+            return
+        self.settings[key] = value
+        settings_store.save(self.settings)
+        self.apply_setting(key, value)
+        self.need_render = True
+
+    def apply_setting(self, key, value):
+        if key == 'theme':
+            theme.apply(value)
+            self.screen.prev = None            # every cell changed
+        elif key == 'autosave':
+            self.autosave = value
+            if value:
+                self.autosave_flush()
+        elif key == 'autosave_delay':
+            self.autosave_delay = value
+        elif key == 'max_lines':
+            self.max_file_lines = value
+        elif key == 'max_mb':
+            self.max_file_bytes = int(value * 1024 * 1024)
+        elif key == 'split_view':
+            self.split = value            # with no terminal the editor just fills
+                                          # the pane, and the top bar offers one
+        elif key == 'show_terminal':
+            self.show_term = value
+            if not value and self.focus == 'terminal':
+                self.focus = 'editor'
+        elif key == 'show_tree':
+            self.show_tree = value
+            if not value and self.focus == 'tree':
+                self.focus = 'editor'
+        elif key == 'tab_width':
+            self.default_tab_width = value
+            for ed in self.editors:
+                if not ed.indent_detected:     # a file with indentation keeps its own
+                    ed.tab_width = value
+
+    def open_settings(self):
+        self.overlay = SettingsPanel(self)
+        self.need_render = True
+
+    def toggle_settings(self):
+        if isinstance(self.overlay, SettingsPanel):
+            self.overlay = None
+            self.need_render = True
+        else:
+            self.open_settings()
+
+    def toggle_autosave(self):
+        self.set_setting('autosave', not self.autosave)
+        self.status('Auto-save %s' % ('on' if self.autosave else 'off'))
+
+    def prompt_save_as(self, ed=None):
+        ed = ed or self.text_editor()
+        if ed is None:
+            return
+        start = ed.doc.path or os.path.join(self.root, '')
+
+        def accept(text):
+            if not text:
+                return
+            target = os.path.abspath(os.path.expanduser(text))
+            if os.path.exists(target) and target != (ed.doc.path or ''):
+                self.overlay = Confirm(
+                    '%s already exists. Overwrite it?' % os.path.basename(target),
+                    lambda: self.save(ed, target, force=True),
+                    on_no=lambda: self.status('Not saved'))
+                self.need_render = True
+                return
+            self.save(ed, target)
+        self.overlay = Prompt('Save as:', text=start, on_accept=accept)
+
+    # ---------------- full-size terminals ----------------
+    def big_term(self):
+        """The full-size terminal session currently on show, if any."""
+        if not self.big_terms:
+            return None
+        self.big_active = max(0, min(self.big_active, len(self.big_terms) - 1))
+        return self.big_terms[self.big_active]
+
+    def main_is_terminal(self):
+        return self.main_view == 'terminal' and bool(self.big_terms)
+
+    def split_active(self, main_w=None):
+        """Split view only applies with a session to show and room to show it."""
+        if not self.split or not self.big_terms:
+            return False
+        if main_w is None:
+            rect = self.rects.get('editor')
+            main_w = (rect.w if rect else 80) + (
+                self.rects['split'].w + 1 if self.rects.get('split') else 0)
+        return main_w >= 60
+
+    def toggle_split(self):
+        """Swap between the two layouts, putting every tab back as it was."""
+        was = 'split' if self.split else 'single'
+        self._view_state[was] = self.viewports()
+        self.set_setting('split_view', not self.split)
+        now = 'split' if self.split else 'single'
+        self.restore_viewports(self._view_state.get(now))
+        self.status('Split view %s' % ('on' if self.split else 'off'))
+
+    def new_big_terminal(self):
+        self._term_seq += 1
+        term = self.adopt(TerminalPanel(self, cwd=self.root, header=False,
+                                        title='terminal %d' % self._term_seq))
+        rect = self.rects.get('editor') if self.rects else None
+        term.start(rect.w if rect else 80, rect.h if rect else 24)
+        self.big_terms.append(term)
+        self.big_active = len(self.big_terms) - 1
+        self.main_view = 'terminal'
+        self.focus = 'editor'
+        self.need_render = True
+        return term
+
+    def show_terminal_view(self):
+        if not self.big_terms:
+            self.new_big_terminal()
+        else:
+            self.main_view = 'terminal'
+            self.focus = 'editor'
+            self.need_render = True
+
+    def show_editor_view(self):
+        self.main_view = 'editor'
+        self.focus = 'editor'
+        self.recheck_disk_soon()
+        self.need_render = True
+
+    def toggle_main_view(self):
+        if self.main_view == 'terminal':
+            self.show_editor_view()
+        else:
+            self.show_terminal_view()
+
+    def close_big_terminal(self, index):
+        if not (0 <= index < len(self.big_terms)):
+            return
+        self.big_terms.pop(index).stop()
+        if not self.big_terms:
+            self.main_view = 'editor'
+            self.focus = 'editor'
+        elif index < self.big_active:
+            self.big_active -= 1          # keep showing the same session
+        elif index == self.big_active:
+            self.big_active = min(index, len(self.big_terms) - 1)
+        self.need_render = True
+
+    def select_big_terminal(self, delta):
+        if len(self.big_terms) > 1:
+            self.big_active = (self.big_active + delta) % len(self.big_terms)
+            self.need_render = True
+
+    # ---------------- diff tabs ----------------
+    def text_editor(self):
+        """The active tab if it is a real editor, else None."""
+        ed = self.editor
+        return None if ed is None or ed.is_diff else ed
+
+    def open_diff(self, view):
+        self.adopt(view)
+        for i, tab in enumerate(self.editors):
+            if getattr(tab, 'key', None) == view.key:
+                view.tab_id = tab.tab_id        # the same tab, rebuilt in place
+                self.editors[i] = view
+                self.active = i
+                break
+        else:
+            self.editors.append(view)
+            self.active = len(self.editors) - 1
+        self.main_view = 'editor'
+        self.focus = 'editor'
+        self.need_render = True
+        return view
+
+    def open_conflict_diff(self, ed):
+        """Your unsaved buffer against the newer file on disk."""
+        path = ed.doc.path
+        view = DiffView(self, 'conflict:%s' % path, 'diff %s' % ed.title,
+                        buffer_source(ed, 'yours (unsaved)'),
+                        disk_source(path, 'on disk (newer)'))
+        ed.doc.conflict_ack_stamp = ed.doc.disk_state()
+        self.status('Read-only diff. Edit in the file tab; this updates as you go.')
+        return self.open_diff(view)
+
+    def open_git_diff(self, ed=None, minimal=True):
+        ed = ed or self.text_editor()
+        if ed is None or not ed.doc.path:
+            self.status('Open a file first')
+            return None
+        if not self.git.enabled:
+            self.status('Not inside a git repository')
+            return None
+        if not self.git.has_diff(ed.doc.path):
+            self.status('%s has no committed version to compare with' % ed.title)
+            return None
+        kind = 'changes' if minimal else 'all'
+        upstream = self.git.upstream_ref()
+        alt = (rev_source(self.git, ed.doc.path, upstream, upstream)
+               if upstream else None)
+        view = DiffView(self, 'git:%s:%s' % (kind, ed.doc.path),
+                        'diff %s (%s)' % (ed.title, kind),
+                        head_source(self.git, ed.doc.path, 'last commit'),
+                        buffer_source(ed, '%s (working)' % ed.title),
+                        minimal=minimal, alt_left=alt)
+        return self.open_diff(view)
+
+    def refresh_diffs(self):
+        view = self.editor
+        if view is not None and view.is_diff and self.main_view == 'editor':
+            if view.refresh():
+                self.need_render = True
+
+    # ---------------- status ----------------
+    def status(self, msg):
+        self.message = msg
+        self.message_time = time.time()
+        self.need_render = True
+
+    # ---------------- layout ----------------
+    def layout(self):
+        w, h = self.screen.width, self.screen.height
+        prompt_h = 1 if (self.overlay is not None and not isinstance(self.overlay, (Help,))
+                         and not getattr(self.overlay, 'is_list', False)) else 0
+        content_h = max(1, h - 1 - prompt_h)
+        sw = SIDEBAR_W if self.show_tree and w > 50 else 0
+        rects = {'status': Rect(0, h - 1, w, 1),
+                 'sidebar': Rect(0, 0, sw, content_h) if sw else None}
+        main_x = sw
+        main_w = w - sw
+        rects['switch'] = Rect(main_x, 0, main_w, 1)
+        rects['tabs'] = Rect(main_x, 1, main_w, 1)
+        body_h = content_h - 2
+        term_h = 0
+        if self.show_term:
+            # until the user drags the splitter, keep the panel to a sane share
+            desired = self.term_h if self.term_h_user_set else min(
+                DEFAULT_TERM_H, max(MIN_TERM_H, int(body_h * 0.45)))
+            term_h = max(MIN_TERM_H, min(desired, max(MIN_TERM_H, body_h - 3)))
+            term_h = max(0, min(term_h, body_h))
+        editor_h = max(1, body_h - term_h)
+        if self.split_active(main_w):
+            left_w = (main_w - 1) // 2
+            rects['editor'] = Rect(main_x, 2, left_w, editor_h)
+            rects['divider'] = main_x + left_w
+            rects['split'] = Rect(main_x + left_w + 1, 2,
+                                  main_w - left_w - 1, editor_h)
+        else:
+            rects['editor'] = Rect(main_x, 2, main_w, editor_h)
+            rects['divider'] = None
+            rects['split'] = None
+        rects['terminal'] = Rect(main_x, 2 + editor_h, main_w, term_h) if term_h else None
+        rects['overlay_area'] = Rect(0, 0, w, h - 1)
+        self.rects = rects
+        return rects
+
+    # ---------------- rendering ----------------
+    def render(self):
+        scr = self.screen
+        r = self.layout()
+        scr.clear(bg=theme.BG)
+        cursor = None
+        if r['sidebar']:
+            self.tree.render(scr, r['sidebar'], self.focus == 'tree')
+        self.render_switch(scr, r['switch'])
+        self.render_tabs(scr, r['tabs'])
+        if r['split'] is not None:
+            left, right = self.editor, self.big_term()
+            focused = self.focus == 'editor'
+            c_left = left.render(scr, r['editor'],
+                                 focused and self.main_view == 'editor') if left else None
+            c_right = right.render(scr, r['split'],
+                                   focused and self.main_view == 'terminal')
+            scr.fill(r['divider'], r['editor'].y, 1, r['editor'].h, bg=theme.PANEL)
+            if focused:
+                cursor = c_right if self.main_view == 'terminal' else c_left
+        else:
+            main = self.big_term() if self.main_is_terminal() else self.editor
+            if main is not None:
+                c = main.render(scr, r['editor'], self.focus == 'editor')
+                if self.focus == 'editor':
+                    cursor = c
+        if r['terminal']:
+            c = self.terminal.render(scr, r['terminal'], self.focus == 'terminal')
+            if self.focus == 'terminal':
+                cursor = c
+        self.render_status(scr, r['status'])
+        if self.overlay is not None:
+            c = self.overlay.render(scr, r['overlay_area'])
+            if c:
+                cursor = c
+        scr.flush(self.out, cursor)
+        self.need_render = False
+
+    def render_switch(self, scr, rect):
+        """The row above the tabs: what the main area is showing."""
+        scr.fill(rect.x, rect.y, rect.w, 1, bg=theme.PANEL)
+        self.toggle_spans = []
+        x = rect.x + 1
+        count = ' %d' % len(self.big_terms) if self.big_terms else ''
+        for view, label in (('editor', '  Editor  '),
+                            ('terminal', '  Terminals%s  ' % count)):
+            active = self.main_view == view
+            bg = theme.STATUS_ACC if active else theme.PANEL_ALT
+            fg = theme.STATUS_FG if active else theme.FG_DIM
+            if x < rect.x2:
+                scr.fill(x, rect.y, min(len(label), rect.x2 - x), 1, bg=bg)
+                scr.put(x, rect.y, label, fg=fg, bg=bg, attr=BOLD if active else 0,
+                        max_x=rect.x2)
+            self.toggle_spans.append((x, x + len(label), view))
+            x += len(label) + 1
+        # a clickable way in to the settings, for keyboards where f9 is awkward
+        chip = ' settings '
+        self.settings_span = None
+        self.new_term_span = None
+        self.diff_spans = []
+        cx = rect.x2 - len(chip)
+        if cx > x + 2:
+            scr.fill(cx, rect.y, len(chip), 1, bg=theme.PANEL_ALT)
+            scr.put(cx, rect.y, chip, fg=theme.TAB_MARK, bg=theme.PANEL_ALT)
+            self.settings_span = (cx, rect.x2)
+        # in split view with nothing to split with, offer to start a shell
+        self.new_term_span = None
+        if self.split and not self.big_terms:
+            label = ' </> '
+            bx = cx - len(label)
+            if bx > x + 2:
+                scr.fill(bx, rect.y, len(label), 1, bg=theme.PANEL_ALT)
+                scr.put(bx, rect.y, label, fg=theme.OK, bg=theme.PANEL_ALT, attr=BOLD)
+                self.new_term_span = (bx, bx + len(label))
+                cx = bx - 1
+        # diff buttons, when the file in front of us has committed changes
+        ed = self.text_editor()
+        if (ed is not None and ed.doc.path and self.git.enabled
+                and self.git.has_diff(ed.doc.path)):
+            for label, minimal in ((' changes ', True), (' diff all ', False)):
+                bx = cx - len(label)
+                if bx <= x + 2:
+                    break
+                scr.fill(bx, rect.y, len(label), 1, bg=theme.PANEL_ALT)
+                scr.put(bx, rect.y, label, fg=theme.GIT_LINE_MODIFIED,
+                        bg=theme.PANEL_ALT)
+                self.diff_spans.append((bx, bx + len(label), minimal))
+                cx = bx - 1
+        hint = 'f2 switch  f5 split  '
+        if cx - len(hint) > x + 2:
+            scr.put(cx - len(hint), rect.y, hint, fg=theme.FG_DIM, bg=theme.PANEL)
+
+    def render_tabs(self, scr, rect):
+        """Tabs for whatever the switch selected, cropped and scrollable."""
+        scr.fill(rect.x, rect.y, rect.w, 1, bg=theme.TAB_BG)
+        self.tab_spans = []
+        self.tab_close_spans = []
+        self.tab_arrows = []
+        self.plus_span = None
+        terminals = self.main_is_terminal()
+        strip = 'terminal' if terminals else 'editor'
+        if terminals:
+            names = [t.title for t in self.big_terms]
+            active_i = self.big_active
+            marks = [False] * len(names)
+        else:
+            names = [ed.title for ed in self.editors]
+            active_i = self.active
+            marks = [ed.doc.dirty for ed in self.editors]
+        # ' name* x ' - the marker slot keeps its width so tabs never jump
+        labels = [' %s%s x ' % (n, '*' if marks[i] else ' ') for i, n in enumerate(names)]
+        widths = [len(lb) for lb in labels]
+        plus = ' + ' if terminals else ''
+        total = sum(widths) + len(plus)
+        avail = max(1, rect.w)
+        self._tab_metrics = (total, avail)
+        scroll = self.tab_scrolls.get(strip, 0)
+        max_scroll = max(0, total - avail)
+        # reveal the active tab when it changes, but leave a strip the user has
+        # scrolled by hand where they put it
+        if widths and self._shown_tab != (strip, active_i):
+            self._shown_tab = (strip, active_i)
+            acc = sum(widths[:active_i])
+            if acc < scroll:
+                scroll = acc
+            elif acc + widths[active_i] > scroll + avail:
+                scroll = acc + widths[active_i] - avail
+        scroll = max(0, min(scroll, max_scroll))
+        self.tab_scrolls[strip] = scroll
+
+        tx = rect.x - scroll
+        for i, label in enumerate(labels):
+            active = i == active_i
+            bg = theme.TAB_ACTIVE_BG if active else theme.TAB_BG
+            fg = theme.TAB_ACTIVE_FG if active else theme.TAB_FG
+            left = max(rect.x, tx)
+            if tx + widths[i] > rect.x and tx < rect.x2:
+                scr.fill(left, rect.y, min(tx + widths[i], rect.x2) - left, 1, bg=bg)
+                scr.put(tx, rect.y, label, fg=fg, bg=bg, attr=BOLD if active else 0,
+                        max_x=rect.x2, min_x=rect.x)
+                mark_x = tx + widths[i] - 4
+                if marks[i] and rect.x <= mark_x < rect.x2:
+                    scr.put(mark_x, rect.y, '*', fg=theme.TAB_MARK, bg=bg, attr=BOLD)
+                close_x = tx + widths[i] - 2
+                if rect.x <= close_x < rect.x2:
+                    scr.put(close_x, rect.y, 'x',
+                            fg=theme.FG if active else theme.FG_DIM, bg=bg)
+                    self.tab_close_spans.append((close_x, i))
+            self.tab_spans.append((tx, tx + widths[i], i))
+            tx += widths[i]
+        if plus and rect.x <= tx and tx + len(plus) <= rect.x2:
+            scr.fill(tx, rect.y, len(plus), 1, bg=theme.PANEL_ALT)
+            scr.put(tx, rect.y, plus, fg=theme.OK, bg=theme.PANEL_ALT, attr=BOLD)
+            self.plus_span = (tx, tx + len(plus))
+        # arrows at the edges, when there is more than fits
+        if scroll > 0:
+            scr.put(rect.x, rect.y, '<', fg=theme.FG, bg=theme.PANEL_ALT, attr=BOLD)
+            self.tab_arrows.append((rect.x, -1))
+        if scroll < max_scroll:
+            scr.put(rect.x2 - 1, rect.y, '>', fg=theme.FG, bg=theme.PANEL_ALT,
+                    attr=BOLD)
+            self.tab_arrows.append((rect.x2 - 1, 1))
+
+    def scroll_tabs(self, direction, step=8):
+        """Slide the tab strip sideways, the way VS Code's wheel does."""
+        total, avail = self._tab_metrics
+        strip = 'terminal' if self.main_is_terminal() else 'editor'
+        limit = max(0, total - avail)
+        self.tab_scrolls[strip] = max(0, min(limit, self.tab_scrolls.get(strip, 0)
+                                             + direction * step))
+        self.need_render = True
+
+    def render_status(self, scr, rect):
+        scr.fill(rect.x, rect.y, rect.w, 1, bg=theme.STATUS_BG)
+        x0 = rect.x + 1
+        if self.git.enabled and self.git.branch:
+            mark = '*' if self.git.statuses else ''
+            chip = ' %s%s ' % (self.git.branch, mark)
+            scr.fill(rect.x, rect.y, min(len(chip) + 1, rect.w), 1, bg=theme.STATUS_ACC)
+            scr.put(rect.x + 1, rect.y, chip.strip(), fg=theme.STATUS_FG,
+                    bg=theme.STATUS_ACC, attr=BOLD, max_x=rect.x2)
+            x0 = rect.x + len(chip) + 2
+        ed = self.editor
+        left = ''
+        if self.message and time.time() - self.message_time < MESSAGE_SECONDS:
+            left = self.message
+        elif self.main_is_terminal():
+            left = self.big_term().title
+        elif ed is not None and ed.is_diff:
+            left = ed.title
+        elif ed:
+            left = self.rel(ed.path) + (' *' if ed.doc.dirty else '')
+        scr.put(x0, rect.y, left, fg=theme.STATUS_FG, bg=theme.STATUS_BG,
+                max_x=rect.x2 - 40)
+        right = ''
+        if ed is not None and ed.is_diff:
+            swap = ('  r: %s' % ed.alt_left.label) if ed.alt_left else ''
+            right = '%d changes  %s  read-only  m: %s%s' % (
+                ed.changes, 'changes only' if ed.minimal else 'whole file',
+                'whole file' if ed.minimal else 'changes only', swap)
+        elif self.main_is_terminal():
+            term = self.big_term()
+            if term.shell and term.shell.exited:
+                state = 'exited'
+            elif term.scroll:
+                state = 'scrolled %d lines back' % term.scroll
+            else:
+                state = os.path.basename(os.environ.get('SHELL', 'sh'))
+            right = 'Terminal %d/%d  %s  f2 editor  f4 new  f1 help' % (
+                self.big_active + 1, len(self.big_terms), state)
+        elif ed:
+            row, col = ed.doc.cursor
+            sel = ed.doc.selection()
+            selinfo = ''
+            if sel:
+                n = len(ed.doc.get_range(*sel))
+                selinfo = '(%d selected) ' % n
+            right = '%sLn %d, Col %d  %s  %s  %s  f1 help' % (
+                selinfo, row + 1, col + 1, ed.hl.name,
+                'Spaces: %d' % ed.tab_width if ed.use_spaces else 'Tabs',
+                'READ-ONLY' if ed.doc.readonly else
+                ('auto-save' if self.autosave else 'manual save'))
+        if self.focus != 'editor':
+            right = '[%s]  %s' % (self.focus, right)
+        x = rect.x2 - len(right) - 1
+        if x > rect.x:
+            scr.put(x, rect.y, right, fg=theme.STATUS_FG, bg=theme.STATUS_BG, max_x=rect.x2)
+
+    # ---------------- focus ----------------
+    def cycle_focus(self, back=False):
+        order = []
+        if self.show_tree:
+            order.append('tree')
+        order.append('editor')
+        if self.show_term:
+            order.append('terminal')
+        if self.focus not in order:
+            self.focus = order[0]
+        else:
+            i = order.index(self.focus)
+            self.focus = order[(i + (-1 if back else 1)) % len(order)]
+        self.need_render = True
+
+    def toggle_terminal(self):
+        if not self.show_term:
+            self.show_term = True
+            self.focus = 'terminal'
+        elif self.focus == 'terminal':
+            self.show_term = False
+            self.focus = 'editor'
+        else:
+            self.focus = 'terminal'
+        self.need_render = True
+
+    # ---------------- prompts ----------------
+    def all_files(self):
+        if self._file_cache is not None:
+            return self._file_cache
+        out = []
+        for dirpath, dirnames, filenames in os.walk(self.root):
+            dirnames[:] = [d for d in dirnames if d not in IGNORE_DIRS and not d.startswith('.git')]
+            for f in filenames:
+                if f in IGNORE_FILES:
+                    continue
+                full = os.path.join(dirpath, f)
+                out.append(os.path.relpath(full, self.root))
+                if len(out) > 20000:
+                    break
+            if len(out) > 20000:
+                break
+        out.sort()
+        self._file_cache = out
+        return out
+
+    def quick_open(self):
+        files = self.all_files()
+
+        def accept(name):
+            if name:
+                self.open_file(os.path.join(self.root, name))
+        self.overlay = Prompt('Open:', items=files, on_accept=accept)
+        self.need_render = True
+
+    def prompt_open_path(self):
+        def accept(text):
+            if text:
+                self.open_file(os.path.abspath(os.path.expanduser(text)))
+        self.overlay = Prompt('Path:', text='', on_accept=accept)
+
+    def prompt_find(self):
+        ed = self.text_editor()
+        if not ed:
+            return
+        sel = ed.doc.selection()
+        initial = ed.doc.get_range(*sel) if sel and sel[0][0] == sel[1][0] else ed.find_query
+
+        def change(text):
+            ed.set_find(text)
+            self.overlay.info = '%d matches' % len(ed.find_matches) if text else ''
+            if ed.find_matches:
+                ed.find_index = min(ed.find_index, len(ed.find_matches) - 1)
+                s, e = ed.find_matches[ed.find_index]
+                ed.doc.anchor, ed.doc.cursor = s, e
+                ed.ensure_visible()
+
+        def accept(text):
+            ed.find_next()
+            return 'keep'
+
+        def cancel():
+            ed.find_query = ''
+            ed.find_matches = []
+
+        self.overlay = Prompt('Find:', text=initial, on_accept=accept, on_change=change,
+                              on_cancel=cancel)
+        if initial:
+            change(initial)
+
+    def prompt_replace(self):
+        ed = self.text_editor()
+        if not ed or not ed.find_query:
+            self.status('Use ctrl+f first, then ctrl+r to replace all matches')
+            return
+        query = ed.find_query
+
+        def accept(text):
+            matches = ed.doc.find_all(query)
+            for s, e in reversed(matches):
+                ed.doc.replace(s, e, text)
+            ed.refresh_find()
+            self.status('Replaced %d occurrence(s)' % len(matches))
+        self.overlay = Prompt('Replace "%s" with:' % query, on_accept=accept)
+
+    def prompt_goto(self):
+        ed = self.text_editor()
+        if not ed:
+            return
+
+        def accept(text):
+            try:
+                n = int(text.strip().split(':')[0])
+            except ValueError:
+                self.status('Not a line number: %s' % text)
+                return
+            ed.set_cursor((max(0, n - 1), 0))
+            ed.top = max(0, n - 1 - ed.text_rect.h // 2)
+        self.overlay = Prompt('Go to line:', on_accept=accept,
+                              info='1-%d' % len(ed.doc.lines))
+
+    # ---------------- events ----------------
+    def handle_key(self, key):
+        combo = key.combo()
+        if self.overlay is not None:
+            current = self.overlay
+            res = current.on_key(key)
+            # a handler may have opened a follow up question; do not wipe it
+            if res == 'close' and self.overlay is current:
+                self.overlay = None
+            self.need_render = True
+            return
+        if combo == 'f1':
+            self.overlay = Help()
+            self.need_render = True
+            return
+        if combo in ('f6', 'shift+f6'):
+            self.cycle_focus(back=key.shift)
+            return
+        if combo == 'ctrl+j':
+            self.toggle_terminal()
+            return
+        if combo == 'f5':
+            self.toggle_split()
+            return
+        if combo == 'f7':
+            self.open_git_diff(minimal=True)
+            return
+        if combo == 'f8':
+            self.open_git_diff(minimal=False)
+            return
+        if combo in ('f9', 'ctrl+t', 'alt+,', 'ctrl+,'):
+            self.toggle_settings()
+            return
+        if combo == 'f2':
+            self.toggle_main_view()
+            return
+        if combo == 'f4':
+            self.new_big_terminal()
+            return
+        if self.focus == 'terminal':
+            self.terminal.on_key(key)
+            self.need_render = True
+            return
+        if self.focus == 'editor' and self.main_is_terminal():
+            # the main area is a shell: only tab switching is kept back from it
+            if combo in ('alt+left', 'ctrl+pageup'):
+                self.select_big_terminal(-1)
+            elif combo in ('alt+right', 'ctrl+pagedown'):
+                self.select_big_terminal(1)
+            else:
+                self.big_term().on_key(key)
+            self.need_render = True
+            return
+        if self.focus == 'tree':
+            if self.tree.on_key(key):
+                self.need_render = True
+                return
+        if combo == 'ctrl+q':
+            self.quit()
+            return
+        if combo == 'ctrl+p':
+            self.quick_open()
+            return
+        if combo == 'ctrl+o':
+            self.prompt_open_path()
+            return
+        if combo == 'ctrl+b':
+            self.show_tree = not self.show_tree
+            if not self.show_tree and self.focus == 'tree':
+                self.focus = 'editor'
+            self.need_render = True
+            return
+        if combo == 'ctrl+n':
+            self.new_file()
+            return
+        if combo == 'ctrl+w':
+            self.close_tab()
+            return
+        if combo == 'ctrl+s':
+            self.save()
+            self.need_render = True
+            return
+        if combo in ('alt+s',):
+            self.prompt_save_as()
+            return
+        if combo == 'alt+a':
+            self.toggle_autosave()
+            return
+        if combo == 'ctrl+f':
+            self.prompt_find()
+            return
+        if combo == 'ctrl+r':
+            self.prompt_replace()
+            return
+        if combo == 'ctrl+g':
+            self.prompt_goto()
+            return
+        if combo in ('alt+left', 'ctrl+pageup'):
+            if self.editors:
+                self.active = (self.active - 1) % len(self.editors)
+                self.recheck_disk_soon()
+                self.need_render = True
+            return
+        if combo in ('alt+right', 'ctrl+pagedown'):
+            if self.editors:
+                self.active = (self.active + 1) % len(self.editors)
+                self.recheck_disk_soon()
+                self.need_render = True
+            return
+        if self.focus == 'editor' and self.editor:
+            if self.editor.on_key(key):
+                self.need_render = True
+                return
+        self.need_render = True
+
+    def handle_paste(self, ev):
+        if self.overlay is not None:
+            self.overlay.on_paste(ev.text)
+        elif self.focus == 'terminal':
+            self.terminal.on_paste(ev.text)
+        elif self.focus == 'editor' and self.main_is_terminal():
+            self.big_term().on_paste(ev.text)
+        elif self.editor:
+            self.editor.paste(ev.text)
+        self.need_render = True
+
+    def handle_mouse(self, ev):
+        self.need_render = True
+        if self.overlay is not None:
+            current = self.overlay
+            res = current.on_mouse(ev)
+            if res == 'accept':
+                r = current.on_key(Key('enter'))
+                if r == 'close' and self.overlay is current:
+                    self.overlay = None
+            if res:
+                return
+            if ev.kind == 'press' and self.overlay is current:
+                self.overlay = None
+            return
+        r = self.rects or self.layout()
+        if self.mouse_capture and ev.kind in ('drag', 'release'):
+            target = self.mouse_capture
+            if ev.kind == 'release':
+                self.mouse_capture = None
+            if target == 'splitter':
+                if ev.kind == 'drag':
+                    body_bottom = r['status'].y
+                    self.term_h = max(MIN_TERM_H, body_bottom - ev.y)
+                    self.term_h_user_set = True
+                return
+            if target == 'editor':
+                main = self.big_term() if self.main_is_terminal() else self.editor
+                if r['split'] is not None:
+                    main = self.editor
+                if main is not None:
+                    main.on_mouse(ev)
+                return
+            if target == 'split':
+                term = self.big_term()
+                if term is not None:
+                    term.on_mouse(ev)
+                return
+            if target == 'terminal':
+                self.terminal.on_mouse(ev)
+                return
+            if target == 'tree':
+                self.tree.on_mouse(ev)
+                return
+            return
+        if r['terminal'] and r['terminal'].contains(ev.x, ev.y):
+            if ev.y == r['terminal'].y:  # header = splitter
+                if ev.kind == 'press':
+                    self.mouse_capture = 'splitter'
+                    self.focus = 'terminal'
+                return
+            if ev.kind == 'press':
+                self.focus = 'terminal'
+                self.mouse_capture = 'terminal'
+            self.terminal.on_mouse(ev)
+            return
+        if r['sidebar'] and r['sidebar'].contains(ev.x, ev.y):
+            if ev.kind == 'press':
+                self.focus = 'tree'
+                self.mouse_capture = 'tree'
+            self.tree.on_mouse(ev)
+            return
+        if r['switch'].contains(ev.x, ev.y):
+            if ev.kind == 'press':
+                self._click_switch(ev)
+            return
+        if r['tabs'].contains(ev.x, ev.y):
+            if ev.kind == 'press':
+                self._click_tab_bar(ev)
+            elif ev.kind in ('wheel_up', 'wheel_left'):
+                self.scroll_tabs(-1)
+            elif ev.kind in ('wheel_down', 'wheel_right'):
+                self.scroll_tabs(1)
+            return
+        if r['split'] is not None and r['split'].contains(ev.x, ev.y):
+            term = self.big_term()
+            if term is None:
+                return
+            if ev.kind == 'press':
+                self.focus = 'editor'
+                self.main_view = 'terminal'      # the right half now has it
+                self.mouse_capture = 'split'
+            term.on_mouse(ev)
+            return
+        if r['editor'].contains(ev.x, ev.y):
+            if r['split'] is not None:
+                main = self.editor
+                if ev.kind == 'press':
+                    self.main_view = 'editor'
+            else:
+                main = self.big_term() if self.main_is_terminal() else self.editor
+            if main is None:
+                return
+            if ev.kind == 'press':
+                self.focus = 'editor'
+                self.mouse_capture = 'editor'
+            main.on_mouse(ev)
+            return
+
+    def _click_switch(self, ev):
+        if self.settings_span and self.settings_span[0] <= ev.x < self.settings_span[1]:
+            self.open_settings()
+            return
+        if self.new_term_span and self.new_term_span[0] <= ev.x < self.new_term_span[1]:
+            self.new_big_terminal()
+            return
+        for x1, x2, minimal in self.diff_spans:
+            if x1 <= ev.x < x2:
+                self.open_git_diff(minimal=minimal)
+                return
+        for x1, x2, view in self.toggle_spans:
+            if x1 <= ev.x < x2:
+                if view == 'terminal':
+                    self.show_terminal_view()
+                else:
+                    self.show_editor_view()
+                return
+
+    def _close_index(self, i):
+        if self.main_is_terminal():
+            self.close_big_terminal(i)
+        else:
+            self.close_tab(i)
+
+    def _click_tab_bar(self, ev):
+        for x, direction in self.tab_arrows:
+            if ev.x == x:
+                self.scroll_tabs(direction, step=16)
+                return
+        if self.plus_span and self.plus_span[0] <= ev.x < self.plus_span[1]:
+            self.new_big_terminal()
+            return
+        for close_x, i in self.tab_close_spans:
+            if ev.x == close_x:
+                self._close_index(i)
+                return
+        for x1, x2, i in self.tab_spans:
+            if x1 <= ev.x < x2:
+                if ev.button == 1:          # middle-click also closes
+                    self._close_index(i)
+                elif self.main_is_terminal():
+                    self.big_active = i
+                    self.focus = 'editor'
+                else:
+                    self.active = i
+                    self.focus = 'editor'
+                    self.recheck_disk_soon()
+                return
+
+    def quit(self):
+        self.autosave_flush()
+        dirty = [e for e in self.editors if e.doc.dirty]
+        if not dirty:
+            self.running = False
+            return
+
+        def save_all():
+            for e in dirty:
+                if e.doc.path:
+                    self.save(e)
+            if any(e.doc.dirty for e in self.editors):
+                # something could not be written (untitled, or a failed save)
+                self.status('Still unsaved - use alt+s to give it a name, '
+                            'or ctrl+q then n to discard')
+                return
+            self.running = False
+
+        self.overlay = Confirm('Save %d modified file(s) before quitting?' % len(dirty),
+                               save_all, on_no=lambda: setattr(self, 'running', False))
+        self.need_render = True
+
+    # ---------------- main loop ----------------
+    def _on_winch(self, *_a):
+        self.resized = True
+
+    def check_resize(self):
+        try:
+            cols, rows = os.get_terminal_size(self.out.fileno())
+        except Exception:
+            cols, rows = 80, 24
+        if cols != self.screen.width or rows != self.screen.height:
+            self.screen.resize(cols, rows)
+            self.need_render = True
+
+    def _on_terminate(self, *_a):
+        """SIGHUP/SIGTERM (the window closed, or someone killed us)."""
+        self.running = False
+
+    def run(self):
+        try:
+            signal.signal(signal.SIGWINCH, self._on_winch)
+        except (ValueError, AttributeError):
+            pass
+        for name in ('SIGHUP', 'SIGTERM', 'SIGINT'):
+            sig = getattr(signal, name, None)
+            if sig is not None:
+                try:
+                    signal.signal(sig, self._on_terminate)
+                except (ValueError, OSError):
+                    pass
+        try:
+            with RawTerminal(self.in_fd, self.out):
+                self.check_resize()
+                self.layout()
+                if self.show_term:
+                    self.terminal.start(
+                        self.rects['terminal'].w if self.rects['terminal'] else 80,
+                        max(2, (self.rects['terminal'].h - 1) if self.rects['terminal'] else 10))
+                self.render()
+                while self.running:
+                    self.tick()
+        finally:
+            # last line of defence: an exception, a lost terminal or a signal
+            # must not cost the user their edits
+            self.autosave_flush()
+            self.terminal.stop()
+            for term in self.big_terms:
+                term.stop()
+
+    def tick(self, timeout=0.2):
+        if self.resized:
+            self.resized = False
+            self.check_resize()
+        if self.message and time.time() - self.message_time >= MESSAGE_SECONDS:
+            self.message = ''            # it has timed out; take it off the bar
+            self.need_render = True
+        panels = {}
+        if self.show_term and self.terminal.fd is not None:
+            panels[self.terminal.fd] = (self.terminal, True)
+        for i, term in enumerate(self.big_terms):
+            if term.fd is not None:
+                panels[term.fd] = (term, self.main_view == 'terminal' and i == self.big_active)
+        fds = [self.in_fd] + list(panels)
+        try:
+            ready, _, _ = select.select(fds, [], [], timeout)
+        except (select.error, OSError) as exc:
+            if getattr(exc, 'errno', None) == 4:  # EINTR
+                return
+            ready = []
+        for fd in ready:
+            if fd not in panels:
+                continue
+            panel, visible = panels[fd]
+            # drain a little so bursty output does not cause a redraw per chunk
+            deadline = time.time() + 0.02
+            while True:
+                if not panel.pump():
+                    break
+                if time.time() > deadline:
+                    break
+                r2, _, _ = select.select([fd], [], [], 0)
+                if not r2:
+                    break
+            if visible:
+                self.need_render = True
+        if self.in_fd in ready:
+            try:
+                data = os.read(self.in_fd, 65536)
+            except OSError:
+                data = b''
+            if not data:
+                self.running = False
+                return
+            for ev in self.decoder.feed(data):
+                if isinstance(ev, Key):
+                    self.handle_key(ev)
+                elif isinstance(ev, Mouse):
+                    self.handle_mouse(ev)
+                elif isinstance(ev, Paste):
+                    self.handle_paste(ev)
+                if not self.running:
+                    break
+        self.autosave_tick()
+        self.check_disk_changes()
+        self.refresh_git()
+        self.refresh_diffs()
+        if self.show_term and self.terminal.shell and self.terminal.shell.exited:
+            self.terminal.shell.poll()
+        # a full-size session closes itself when its shell exits
+        for i in range(len(self.big_terms) - 1, -1, -1):
+            shell = self.big_terms[i].shell
+            if shell and shell.exited:
+                shell.poll()
+                self.close_big_terminal(i)
+        if self.need_render and self.running:
+            self.render()

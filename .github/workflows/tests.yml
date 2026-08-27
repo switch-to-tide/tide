@@ -1,0 +1,35 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ['3.9', '3.12']
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Editing core and saving (fast, deterministic)
+        run: |
+          python tests/test_units.py
+          python tests/test_saving.py
+
+      # These drive the IDE on a real pty, so they depend on timing a little.
+      - name: Full suite, including the pty tests
+        run: python tests/run_all.py
+
+      - name: Install and launch the console script
+        run: |
+          python -m pip install --upgrade pip
+          pip install .
+          tide --version
