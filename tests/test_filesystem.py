@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from harness import CTRL, ENTER, ESC, Session
 from tide.app import App
-from tide.buffer import Document
+from tide.buffer import Document, NEW_FILE_MODE
 
 DARWIN = sys.platform == 'darwin'
 
@@ -204,7 +204,7 @@ class TestWritesThatFail(FsTest):
 
         def no_space(target, mode='r', *args, **kw):
             handle = real_open(target, mode, *args, **kw)
-            if 'w' in mode and 'tide-tmp' in str(target):
+            if 'w' in mode and isinstance(target, int):   # the temp file's fd
                 class Full(object):
                     def __enter__(self):
                         return self
@@ -484,6 +484,46 @@ class TestSomebodyActuallyEditing(unittest.TestCase):
         self.s.pump(0.4)
         self.assertNotIn('OOPS', self.read())
         self.assertEqual(self.read(), '# Heading\n\nfirst line\nsecond line\n')
+
+
+class TestPlantedTempFile(FsTest):
+    """Somebody else can write to the directory holding the file we edit."""
+
+    def test_a_symlink_left_at_our_temp_name_is_not_written_through(self):
+        victim = self.write('SECRET', b'do not touch\n')
+        path = self.write('file.txt', b'hello\n')
+        doc = Document(path)
+        doc.insert('X')
+        planted = ['%s.tide-tmp.%d' % (path, os.getpid())]
+        planted += ['%s.tide-tmp.%d.%08x' % (path, os.getpid(), i)
+                    for i in range(8)]          # guess a few of the random tails
+        for name in planted:
+            os.symlink(victim, name)
+        doc.save()
+        self.assertEqual(self.read(victim), b'do not touch\n',
+                         'the save was steered onto another file')
+        self.assertEqual(self.read(path), b'Xhello\n', 'the save did not land')
+        for name in planted:
+            self.assertTrue(os.path.islink(name), 'we wrote onto a planted name')
+
+    def test_a_leftover_temp_file_does_not_block_saving(self):
+        path = self.write('file.txt', b'hello\n')
+        stale = '%s.tide-tmp.%d' % (path, os.getpid())
+        with open(stale, 'wb') as f:
+            f.write(b'from a process that died\n')
+        doc = Document(path)
+        doc.insert('X')
+        doc.save()                                # a fresh name, so no clash
+        self.assertEqual(self.read(path), b'Xhello\n')
+
+    def test_a_new_file_gets_the_ordinary_mode(self):
+        path = os.path.join(self.tmp, 'brand_new.txt')
+        doc = Document()
+        doc.insert('hi')
+        doc.save(path)
+        mode = stat.S_IMODE(os.stat(path).st_mode)
+        self.assertEqual(mode, NEW_FILE_MODE, 'a new file came out %o' % mode)
+        self.assertNotEqual(mode, 0o600, 'the temp file mode leaked through')
 
 
 if __name__ == '__main__':

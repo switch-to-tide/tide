@@ -13,6 +13,13 @@ WORD_RE = re.compile(r'\w+')
 # Emacs draws the same line at twenty
 COALESCE_LIMIT = 20
 
+# the temp file is created private and readable only by us; a brand new file
+# then gets the mode a plain open() would have given it. Reading the umask
+# means setting it, so we do it once here, at import, before anything runs.
+_UMASK = os.umask(0o022)
+os.umask(_UMASK)
+NEW_FILE_MODE = 0o666 & ~_UMASK
+
 
 class StaleFileError(IOError):
     """The file changed on disk after we read it; saving would lose that work."""
@@ -256,10 +263,16 @@ class Document(object):
         return True
 
     def _write_atomically(self, target, data, guard, path):
-        # the process id keeps two editors saving the same file apart
-        tmp = '%s.tide-tmp.%d' % (target, os.getpid())
+        # The process id keeps two editors saving the same file apart, and the
+        # random tail keeps us apart from a leftover of a dead one. O_EXCL is
+        # what matters: we create the temp file or we fail, so nobody who can
+        # write to this directory can leave a symlink here beforehand and have
+        # the save land on a file of their choosing.
+        tmp = '%s.tide-tmp.%d.%s' % (target, os.getpid(), os.urandom(4).hex())
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0)
         try:
-            with io.open(tmp, 'w', encoding='utf-8', newline='') as f:
+            fd = os.open(tmp, flags, 0o600)
+            with io.open(fd, 'w', encoding='utf-8', newline='') as f:
                 f.write(data)
                 f.flush()
                 os.fsync(f.fileno())      # on disk before the rename
@@ -292,7 +305,11 @@ class Document(object):
         try:
             st = os.stat(original)
         except OSError:
-            return                        # brand new file: leave the defaults
+            try:
+                os.chmod(tmp, NEW_FILE_MODE)   # brand new file: the usual mode
+            except OSError:
+                pass
+            return
         try:
             os.chmod(tmp, stat.S_IMODE(st.st_mode))
         except OSError:
