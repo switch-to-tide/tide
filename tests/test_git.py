@@ -130,6 +130,152 @@ class TestGitQueries(unittest.TestCase):
             shutil.rmtree(plain, ignore_errors=True)
 
 
+class TestIgnoredFiles(unittest.TestCase):
+    def setUp(self):
+        self.repo = make_repo('tide-ignored-')
+        with open(os.path.join(self.repo, '.gitignore'), 'w') as f:
+            f.write('*.log\nscratch/\n')
+        with open(os.path.join(self.repo, 'debug.log'), 'w') as f:
+            f.write('noise\n')
+        os.mkdir(os.path.join(self.repo, 'scratch'))
+        with open(os.path.join(self.repo, 'scratch', 'note.txt'), 'w') as f:
+            f.write('x\n')
+        git(self.repo, 'add', '-A')
+        git(self.repo, 'commit', '-q', '-m', 'ignore rules')
+        self.g = Git(self.repo)
+        self.g.refresh(force=True)
+
+    def tearDown(self):
+        shutil.rmtree(self.repo, ignore_errors=True)
+
+    def path(self, name):
+        return os.path.join(self.repo, name)
+
+    def test_it_knows_what_git_ignores(self):
+        paths = [self.path(n) for n in ('tracked.txt', 'debug.log', 'scratch',
+                                        '.gitignore')]
+        self.g.mark_ignored(paths)
+        self.assertTrue(self.g.is_ignored(self.path('debug.log')))
+        self.assertTrue(self.g.is_ignored(self.path('scratch')))
+        self.assertFalse(self.g.is_ignored(self.path('tracked.txt')))
+        self.assertFalse(self.g.is_ignored(self.path('.gitignore')))
+
+    def test_the_answer_is_cached(self):
+        paths = [self.path('debug.log'), self.path('tracked.txt')]
+        self.g.mark_ignored(paths)
+        calls = []
+        real = self.g._run
+        self.g._run = lambda a, timeout=3.0, stdin=None: (
+            calls.append(a[0]), real(a, timeout, stdin))[1]
+        for _ in range(20):
+            self.g.mark_ignored(paths)
+        self.assertEqual(calls, [], 'git was asked again for the same paths')
+
+    def test_an_ignored_file_has_no_status(self):
+        self.assertIsNone(self.g.status_for(self.path('debug.log')))
+
+    def test_they_are_greyed_in_the_explorer(self):
+        s = Session([self.repo], cols=90, rows=20, cwd=self.repo,
+                    env={'TIDE_CONFIG_HOME': tempfile.mkdtemp()})
+        try:
+            s.pump(1.8)
+            rows = {}
+            for y, line in enumerate(s.text()):
+                name = line[:24].strip()
+                if name:
+                    rows[name] = s.cell(3, y)[1]
+            self.assertIn('debug.log', rows, 'the ignored file is not listed')
+            self.assertIn('tracked.txt', rows)
+            self.assertEqual(rows['debug.log'], 241, 'it should be greyed out')
+            self.assertNotEqual(rows['tracked.txt'], 241)
+            row = [l for l in s.text() if 'debug.log' in l[:24]][0]
+            self.assertNotIn('U', row[:26], 'an ignored file got a status letter')
+        finally:
+            s.close()
+
+
+class TestOverviewRuler(unittest.TestCase):
+    """Ticks down the scrollbar showing where the changes are."""
+
+    def setUp(self):
+        self.repo = make_repo('tide-ruler-')
+        self.path = os.path.join(self.repo, 'long.py')
+        self.lines = ['line %d' % i for i in range(200)]
+        self.write(self.lines)
+        git(self.repo, 'add', '-A')
+        git(self.repo, 'commit', '-q', '-m', 'long file')
+
+    def tearDown(self):
+        shutil.rmtree(self.repo, ignore_errors=True)
+
+    def write(self, lines):
+        with open(self.path, 'w') as f:
+            f.write('\n'.join(lines) + '\n')
+
+    def column(self, session, width=90, top=2, bottom=14):
+        x = width - 1
+        return ''.join({114: 'G', 39: 'B', 203: 'R'}.get(session.cell(x, y)[1], '.')
+                       for y in range(top, bottom))
+
+    def test_changes_show_up_at_their_position_in_the_file(self):
+        lines = list(self.lines)
+        lines[5] = 'line 5 CHANGED'
+        lines[100] = 'line 100 CHANGED'
+        lines.insert(150, 'brand new')
+        del lines[190]
+        self.write(lines)
+        s = Session(['long.py', self.repo], cols=90, rows=24, cwd=self.repo,
+                    env={'TIDE_CONFIG_HOME': tempfile.mkdtemp()})
+        try:
+            s.pump(2.0)
+            marks = self.column(s)
+            self.assertGreaterEqual(len(marks.replace('.', '')), 3,
+                                    'the ruler is empty: %r' % marks)
+            self.assertIn('B', marks, 'no mark for the edited lines')
+            self.assertIn('G', marks, 'no mark for the added line')
+            first = marks.index([c for c in marks if c != '.'][0])
+            last = len(marks) - 1 - marks[::-1].index(
+                [c for c in reversed(marks) if c != '.'][0])
+            self.assertLess(first, 3, 'the early change is not near the top')
+            self.assertGreater(last, len(marks) - 4,
+                               'the late change is not near the bottom')
+        finally:
+            s.close()
+
+    def test_the_thumb_is_still_there(self):
+        lines = list(self.lines)
+        lines[3] = 'changed'
+        self.write(lines)
+        s = Session(['long.py', self.repo], cols=90, rows=24, cwd=self.repo,
+                    env={'TIDE_CONFIG_HOME': tempfile.mkdtemp()})
+        try:
+            s.pump(2.0)
+            backgrounds = [s.cell(89, y)[2] for y in range(2, 14)]
+            self.assertTrue(any(b in (243, 250) for b in backgrounds),
+                            'the scrollbar thumb was painted over')
+            self.assertTrue(any(b == 237 for b in backgrounds), 'no track')
+        finally:
+            s.close()
+
+    def test_a_short_file_has_no_scrollbar_and_no_ruler(self):
+        short = os.path.join(self.repo, 'short.py')
+        with open(short, 'w') as f:
+            f.write('one\ntwo\n')
+        git(self.repo, 'add', '-A')
+        git(self.repo, 'commit', '-q', '-m', 'short')
+        with open(short, 'w') as f:
+            f.write('one\nTWO CHANGED\n')
+        s = Session(['short.py', self.repo], cols=90, rows=24, cwd=self.repo,
+                    env={'TIDE_CONFIG_HOME': tempfile.mkdtemp()})
+        try:
+            s.pump(2.0)
+            self.assertEqual(self.column(s).strip('.'), '',
+                             'a file that fits should have no ruler')
+            self.assertNotIn(237, [s.cell(89, y)[2] for y in range(2, 14)])
+        finally:
+            s.close()
+
+
 class TestGitInTheUI(unittest.TestCase):
     cols, rows = 92, 22
 

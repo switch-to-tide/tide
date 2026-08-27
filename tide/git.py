@@ -44,6 +44,8 @@ class Git(object):
         self.branch = None            # the name shown in the status bar
         self._upstream = None
         self._upstream_token = object()
+        self._ignored = {}            # path -> True, as git check-ignore says
+        self._ignored_revision = -1
         self._last_refresh = 0.0
         self._failures = 0
         self.repo = self._toplevel()
@@ -58,11 +60,19 @@ class Git(object):
         return path
 
     # ---------------- running git ----------------
-    def _run(self, args, timeout=3.0):
+    def _run(self, args, timeout=3.0, stdin=None):
         try:
-            out = subprocess.check_output(
-                ['git'] + args, cwd=self.root, stderr=subprocess.DEVNULL,
-                timeout=timeout)
+            if stdin is not None:
+                process = subprocess.Popen(
+                    ['git'] + args, cwd=self.root, stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+                out = process.communicate(stdin, timeout=timeout)[0]
+                if process.returncode not in (0, 1):   # 1 just means no matches
+                    raise OSError('git said %s' % process.returncode)
+            else:
+                out = subprocess.check_output(
+                    ['git'] + args, cwd=self.root, stderr=subprocess.DEVNULL,
+                    timeout=timeout)
         except Exception:
             self._failures += 1
             if self._failures >= 3:
@@ -260,6 +270,32 @@ class Git(object):
 
     def file_at_head(self, path):
         return self.file_at_rev(path, 'HEAD')
+
+    # ---------------- ignored files ----------------
+    def mark_ignored(self, paths):
+        """Ask git which of these paths are ignored, and remember the answer.
+
+        One call for everything the explorer is showing, refreshed when the
+        repository changes, so drawing a row costs nothing.
+        """
+        if not self.enabled or not paths:
+            return
+        if self._ignored_revision != self.revision:
+            self._ignored = {}
+            self._ignored_revision = self.revision
+        unknown = [p for p in paths if p not in self._ignored]
+        if not unknown:
+            return
+        out = self._run(['check-ignore', '--stdin', '-z'],
+                        stdin=b'\0'.join(p.encode('utf-8') for p in unknown))
+        hits = set()
+        if out:
+            hits = set(part for part in out.decode('utf-8', 'replace').split('\0') if part)
+        for p in unknown:
+            self._ignored[p] = p in hits
+
+    def is_ignored(self, path):
+        return bool(self._ignored.get(path))
 
     def has_diff(self, path):
         """True for a tracked file with changes - the case a diff is worth it."""

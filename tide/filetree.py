@@ -35,6 +35,9 @@ class FileTree(object):
         keep = self.entries[self.index].path if 0 <= self.index < len(self.entries) else None
         self.entries = []
         self._walk(self.root, 0)
+        git = getattr(self.app, 'git', None)
+        if git is not None and git.enabled:
+            git.mark_ignored([e.path for e in self.entries])
         if keep:
             for i, e in enumerate(self.entries):
                 if e.path == keep:
@@ -199,10 +202,15 @@ class FileTree(object):
                 mark = '  '
                 fg = theme.TREE_FILE
             git = self.app.git.status_for(e.path, e.is_dir) if self.app else None
-            if git:
+            ignored = self.app.git.is_ignored(e.path) if self.app else False
+            if ignored:
+                fg = theme.GIT_IGNORED          # git is not watching this one
+                git = None
+            elif git:
                 fg = theme.git_colour(git)
             label = prefix + mark + e.name
             screen.put(rect.x, y, label[:rect.w], fg=fg, bg=bg,
-                       attr=BOLD if e.is_dir else 0, max_x=rect.x2 - 2)
+                       attr=0 if ignored else (BOLD if e.is_dir else 0),
+                       max_x=rect.x2 - 2)
             if git and not e.is_dir:
                 screen.put(rect.x2 - 2, y, git, fg=fg, bg=bg, attr=BOLD)

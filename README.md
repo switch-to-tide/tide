@@ -178,7 +178,10 @@ Requires Python 3.7+ and a terminal that speaks xterm mouse reporting
   for conflicts. Folders containing changes are tinted too.
 - A change bar runs down the left of the editor gutter: **green** for lines
   added since the last commit, **blue** for lines edited, and a small **red**
-  mark where lines were removed.
+  mark where lines were removed. The same colours appear as ticks down the
+  scrollbar, in proportion to where they fall in the file, so a long file shows
+  its edits at a glance - and there are none when the file already fits.
+- Files git is told to ignore are greyed in the explorer and carry no status.
 - That is the whole of it, deliberately. Branches, staging, commits and pushing
   are things you already do in a shell — and there is one right there.
 

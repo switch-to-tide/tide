@@ -763,6 +763,29 @@ class Editor(object):
         colour = theme.SCROLL_THUMB_HL if (focused or self.drag_mode == 'scrollbar') \
             else theme.SCROLL_THUMB
         screen.fill(self.sb_x, r.y + offset, 1, thumb, bg=colour)
+        self._render_overview(screen)
+
+    def _render_overview(self, screen):
+        """Where the changes are, in miniature, down the scrollbar.
+
+        One tick per screen row, so a long file shows its edits at a glance
+        without scrolling to find them.
+        """
+        if not self.git_marks or self.sb_x is None:
+            return
+        r = self.text_rect
+        total = max(1, len(self.doc.lines))
+        rank = {'added': 1, 'modified': 2, 'deleted': 3}
+        worst = {}
+        for line, kind in self.git_marks.items():
+            y = r.y + min(r.h - 1, int(line * r.h / total))
+            if rank.get(kind, 0) >= rank.get(worst.get(y), 0):
+                worst[y] = kind
+        for y, kind in worst.items():
+            if not (0 <= y < screen.height):
+                continue
+            behind = screen.cells[y][self.sb_x][2]      # track or thumb
+            screen.put(self.sb_x, y, '─', fg=theme.LINE_COLOUR[kind], bg=behind)
 
     def cursor_screen_pos(self):
         row, col = self.doc.cursor
