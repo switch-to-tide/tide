@@ -137,6 +137,20 @@ class VT(object):
         elif c == '\x07':
             self.bell = True
 
+    @staticmethod
+    def _string_end(s, start, bel):
+        """Where a control string ends: ST, its one-byte form, or BEL."""
+        ends = []
+        for needle, width in (('\x1b\\', 2), ('\x9c', 1)):
+            at = s.find(needle, start)
+            if at >= 0:
+                ends.append((at, width))
+        if bel:
+            at = s.find('\x07', start)
+            if at >= 0:
+                ends.append((at, 1))
+        return min(ends) if ends else None
+
     def _escape(self, s, i):
         if i + 1 >= len(s):
             return 0
@@ -149,16 +163,24 @@ class VT(object):
             return m.end() - i
         if c == ']':
             # OSC ... terminated by BEL or ST
-            bel = s.find('\x07', i)
-            st = s.find('\x1b\\', i + 2)
-            ends = [x for x in (bel, st) if x >= 0]
-            if not ends:
+            found = self._string_end(s, i + 2, bel=True)
+            if found is None:
                 return 0 if len(s) - i < 512 else 2
-            end = min(ends)
+            end, term = found
             body = s[i + 2:end]
             if body.startswith('0;') or body.startswith('2;'):
                 self.title = body[2:]
-            return (end + (1 if end == bel else 2)) - i
+            return end + term - i
+        if c in 'P^_X':
+            # DCS, PM, APC, SOS: a string for the terminal, ended by ST and
+            # never shown. Claude Code wraps its progress reports in a DCS,
+            # and tmux passes sequences through the same way; without this the
+            # payload spills into the pane as text.
+            found = self._string_end(s, i + 2, bel=False)
+            if found is None:
+                return 0 if len(s) - i < 4096 else 2
+            end, term = found
+            return end + term - i
         if c in '()*+':
             return 3 if i + 2 < len(s) else 0
         if c == 'M':

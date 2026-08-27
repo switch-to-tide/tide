@@ -375,6 +375,37 @@ class TestVT(unittest.TestCase):
         self.assertEqual(v.text_lines()[0], '')
         self.assertEqual(v.text_lines()[1], 'a')
 
+    def _line(self, v, row=0):
+        return ''.join(c[0] or ' ' for c in v.grid[row]).rstrip()
+
+    def test_a_device_control_string_is_swallowed(self):
+        v = VT(40, 3)
+        v.feed(b'\x1bPsome;payload\x1b\\ok')
+        self.assertEqual(self._line(v), 'ok')
+
+    def test_the_progress_report_claude_code_sends(self):
+        # ESC P ESC ESC ] 9;4;0; BEL ESC \  - an OSC wrapped in a DCS, which
+        # used to spill ']9;4;0;' into the pane
+        v = VT(40, 3)
+        v.feed(b'\x1bP\x1b\x1b]9;4;0;\x07\x1b\\hello')
+        self.assertEqual(self._line(v), 'hello')
+
+    def test_control_strings_survive_being_split(self):
+        raw = (b'\x1b]0;title\x07\x1bP\x1b\x1b]9;4;3;\x07\x1b\\'
+               b'\x1b_app\x1b\\text')
+        for cut in range(1, len(raw)):
+            v = VT(40, 3)
+            v.feed(raw[:cut])
+            v.feed(raw[cut:])
+            self.assertEqual(self._line(v), 'text', 'split at %d' % cut)
+            self.assertEqual(v.title, 'title')
+
+    def test_an_eight_bit_string_terminator_ends_one(self):
+        v = VT(40, 3)
+        v.feed(b'\x1b]0;name\xc2\x9cafter')
+        self.assertEqual(self._line(v), 'after')
+        self.assertEqual(v.title, 'name')
+
 
 class TestScreen(unittest.TestCase):
     def test_diff_flush_is_minimal(self):
