@@ -13,6 +13,7 @@ that can only play.
 
 import os
 import shlex
+import tempfile
 import signal
 import subprocess
 import time
@@ -21,6 +22,33 @@ from . import probe
 
 ANY = None                       # a backend that plays whatever it is given
 WAVE_ONLY = {'.wav', '.aiff', '.aif', '.au', '.snd', '.flac', '.ogg'}
+
+
+def _short(line, limit=70):
+    return line[:limit] + ('…' if len(line) > limit else '')
+
+
+# a sound library complaining about its own configuration, ten lines at a
+# time, is not the thing worth showing
+NOISE = ('ALSA lib', 'snd_func', 'snd_config', 'snd_pcm', 'Evaluate error',
+         'no such file or directory: /usr/share/alsa')
+
+
+def _noise(line):
+    return any(part in line for part in NOISE)
+
+
+# what it usually means when a player will not start on a machine like this
+NO_DEVICE = ('audio open failed', 'no such audio device', 'cannot find card',
+             'connection refused', 'no soundcards', 'device or resource busy',
+             'unable to open slave', 'cannot open audio device',
+             'failed to open file', 'no such device')
+
+
+def no_sound_card(message):
+    """Whether this looks like a machine with nowhere to send sound."""
+    low = (message or '').lower()
+    return any(part in low for part in NO_DEVICE)
 
 
 class Backend(object):
@@ -42,7 +70,8 @@ class Backend(object):
 
 
 def _ffplay(path, start, rate):
-    args = ['ffplay', '-nodisp', '-autoexit', '-loglevel', 'quiet']
+    # 'error', not 'quiet': when it will not play we want to know why
+    args = ['ffplay', '-nodisp', '-autoexit', '-loglevel', 'error']
     if start:
         args += ['-ss', '%.3f' % start]
     if rate != 1.0:
@@ -51,7 +80,7 @@ def _ffplay(path, start, rate):
 
 
 def _mpv(path, start, rate):
-    args = ['mpv', '--no-video', '--really-quiet', '--no-terminal']
+    args = ['mpv', '--no-video', '--no-terminal', '--msg-level=all=error']
     if start:
         args.append('--start=%.3f' % start)
     if rate != 1.0:
@@ -84,18 +113,43 @@ def _vlc(path, start, rate):
     return args + [path]
 
 
+RATE, CHANNELS = 48000, 2        # what the decoder hands the sound server
+
+
+def _decode(path, start, rate, out_format='s16le'):
+    """ffmpeg, decoding to plain samples at a rate everything understands."""
+    parts = ['ffmpeg', '-v', 'error', '-nostdin']
+    if start:
+        parts += ['-ss', '%.3f' % start]
+    parts += ['-i', path]
+    if rate != 1.0:
+        parts += ['-af', 'atempo=%.3f' % rate]
+    return parts + ['-f', out_format, '-ar', str(RATE), '-ac', str(CHANNELS), '-']
+
+
 def _pipe(sink):
-    """ffmpeg decodes anything; the sink just has to play a wav on stdin."""
+    """ffmpeg decodes; the sink plays what comes down the pipe.
+
+    Raw samples, not a wav: a wav written to a pipe has no length in its
+    header, which some players read as an empty file and exit happily on
+    without making a sound. The two run as two children of ours rather than
+    through a shell, so a failure can be attributed to one of them.
+    """
     def build(path, start, rate):
-        parts = ['ffmpeg', '-v', 'quiet']
+        return [_decode(path, start, rate), shlex.split(sink)]
+    return build
+
+
+def _pipe_wav(sink):
+    """The same, for a player that insists on a container."""
+    def build(path, start, rate):
+        parts = ['ffmpeg', '-v', 'error', '-nostdin']
         if start:
             parts += ['-ss', '%.3f' % start]
         parts += ['-i', path]
         if rate != 1.0:
             parts += ['-af', 'atempo=%.3f' % rate]
-        parts += ['-f', 'wav', '-']
-        line = ' '.join(shlex.quote(p) for p in parts)
-        return ['/bin/sh', '-c', '%s | %s' % (line, sink)]
+        return [parts + ['-f', 'wav', '-'], shlex.split(sink)]
     return build
 
 
@@ -112,12 +166,19 @@ BACKENDS = [
     Backend('play', _sox, seek=True, rate=True),          # sox
     # then ffmpeg, which is on far more machines than ffplay is, decoding into
     # anything that can play a wav on its standard input
-    Backend('ffmpeg|aplay', _pipe('aplay -q -'), seek=True, rate=True,
-            needs=['ffmpeg', 'aplay']),
-    Backend('ffmpeg|pw-cat', _pipe('pw-cat --playback -'), seek=True, rate=True,
-            needs=['ffmpeg', 'pw-cat']),
-    Backend('ffmpeg|afplay', _pipe('afplay /dev/stdin'), seek=True, rate=True,
-            needs=['ffmpeg', 'afplay']),
+    Backend('ffmpeg|pacat',
+            _pipe('pacat --playback --raw --format=s16le --rate=%d --channels=%d'
+                  % (RATE, CHANNELS)),
+            seek=True, rate=True, needs=['ffmpeg', 'pacat']),
+    Backend('ffmpeg|pw-cat',
+            _pipe('pw-cat --playback --raw --format s16 --rate %d --channels %d -'
+                  % (RATE, CHANNELS)),
+            seek=True, rate=True, needs=['ffmpeg', 'pw-cat']),
+    Backend('ffmpeg|aplay',
+            _pipe('aplay -q -t raw -f S16_LE -r %d -c %d -' % (RATE, CHANNELS)),
+            seek=True, rate=True, needs=['ffmpeg', 'aplay']),
+    Backend('ffmpeg|afplay', _pipe_wav('afplay /dev/stdin'), seek=True,
+            rate=True, needs=['ffmpeg', 'afplay']),
     Backend('cvlc', _vlc, seek=True, rate=True),
     # and last the ones that only play: afplay is on every Mac, and the rest
     # are whatever the sound server on this Linux happens to be
@@ -174,6 +235,10 @@ class Player(object):
         self._base = 0.0            # where this run started, in the file
         self._since = None          # when it started, on the wall clock
         self._done = False
+        self._feeder = None         # ffmpeg, when something is decoding for us
+        self._notes = None          # what the players had to say for themselves
+        self._expected = None       # how much audio this run should produce
+        self.command = None         # what we actually ran, for diagnosis
 
     # ---------------- state ----------------
     @property
@@ -209,16 +274,41 @@ class Player(object):
         if code is None:
             return False
         at = self.position()
+        ran = time.time() - (self._since or time.time())
+        said = self._said()
         self._reap()
         self._done = True
         self._since = None
-        short = self.duration and at < self.duration - 0.5
-        if code not in (0, -9, -15) and short:
-            self.error = '%s could not play this file' % self.backend.name
-            self._base = at                   # leave the bar where it stopped
+        # a player that stopped long before the end has failed, whatever its
+        # exit status was: a sink fed by a decoder that died exits happily
+        early = self._expected is not None and ran < self._expected - 0.5
+        if code in (-9, -15):
+            self._base = at                   # we killed it ourselves
+        elif code or early:
+            self.error = said or ('%s stopped without playing it'
+                                  % self.backend.name)
+            self._base = at
         else:
             self._base = self.duration or at
         return True
+
+    def _said(self):
+        """The last useful line the player wrote, if it wrote one."""
+        notes = self._notes
+        if notes is None:
+            return None
+        try:
+            notes.seek(0)
+            text = notes.read().decode('utf-8', 'replace')
+        except Exception:
+            return None
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        useful = [line for line in lines if not _noise(line)]
+        if not useful:
+            return _short(lines[0]) if lines else None
+        # the first real complaint is the cause; anything after it is usually
+        # the other half of the pipe reacting to it
+        return _short(useful[0])
 
     # ---------------- doing things ----------------
     def play(self, at=None):
@@ -232,10 +322,9 @@ class Player(object):
         self.stop(keep_position=True)
         source, offset = self._source_for(start)
         args = self.backend.build(source, offset, self.rate)
+        self.command = args
         try:
-            self._process = subprocess.Popen(
-                args, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL, start_new_session=True)
+            self._spawn(args)
         except OSError as exc:
             self.error = 'could not start %s (%s)' % (self.backend.name, exc)
             self._process = None
@@ -244,7 +333,27 @@ class Player(object):
         self._done = False
         self._base = start
         self._since = time.time()
+        self._expected = self.duration - start if self.duration else None
         return True
+
+    def _spawn(self, args):
+        """One player, or a decoder feeding one, with their words kept."""
+        self._notes = tempfile.TemporaryFile()
+        if args and isinstance(args[0], list):
+            feeder, sink = args
+            self._feeder = subprocess.Popen(
+                feeder, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                stderr=self._notes, start_new_session=True)
+            try:
+                self._process = subprocess.Popen(
+                    sink, stdin=self._feeder.stdout, stdout=subprocess.DEVNULL,
+                    stderr=self._notes, start_new_session=True)
+            finally:
+                self._feeder.stdout.close()      # only the sink holds it now
+            return
+        self._process = subprocess.Popen(
+            args, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=self._notes, start_new_session=True)
 
     def use_source(self, path):
         """Play from somewhere else from now on - a copy of a deleted file."""
@@ -322,13 +431,13 @@ class Player(object):
         elif self._since is not None:
             self._base = self.position()
         self._since = None
-        process = self._process
-        self._process = None
-        if process is not None and process.poll() is None:
-            self._process = process           # _signal works on this one
-            self._signal(signal.SIGCONT)      # a stopped child ignores
-            self._signal(signal.SIGKILL)      # anything but SIGKILL
-            self._process = None
+        self._signal(signal.SIGCONT)      # a stopped child ignores
+        self._signal(signal.SIGKILL)      # anything but SIGKILL
+        for name in ('_process', '_feeder'):
+            process = getattr(self, name)
+            setattr(self, name, None)
+            if process is None:
+                continue
             try:
                 process.kill()
             except Exception:
@@ -340,25 +449,30 @@ class Player(object):
         self._drop_temp()
 
     def _signal(self, sig):
-        """Signal the player and anything it started, as one group."""
-        process = self._process
-        if process is None or process.poll() is not None:
-            return False
-        try:
-            os.killpg(os.getpgid(process.pid), sig)
-            return True
-        except Exception:
-            pass
-        try:
-            process.send_signal(sig)
-            return True
-        except Exception:
-            return False
+        """Signal the player, its decoder, and anything they started."""
+        sent = False
+        for process in (self._process, self._feeder):
+            if process is None or process.poll() is not None:
+                continue
+            try:
+                os.killpg(os.getpgid(process.pid), sig)
+                sent = True
+                continue
+            except Exception:
+                pass
+            try:
+                process.send_signal(sig)
+                sent = True
+            except Exception:
+                pass
+        return sent
 
     def _reap(self):
-        process = self._process
-        self._process = None
-        if process is not None:
+        for name in ('_process', '_feeder'):
+            process = getattr(self, name)
+            setattr(self, name, None)
+            if process is None:
+                continue
             try:
                 process.wait(timeout=0.1)
             except Exception:

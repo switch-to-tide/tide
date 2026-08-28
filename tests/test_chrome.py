@@ -228,5 +228,95 @@ class TestTabStrip(unittest.TestCase):
         self.assertNotEqual(self.tabs(), before)
 
 
+class TestSwitchingBack(unittest.TestCase):
+    """ctrl+t: the tab before this one, inside its own group."""
+
+    def setUp(self):
+        import io
+        from tide.term import Screen
+        self.tmp = tempfile.mkdtemp(prefix='tide-back-')
+        self.cfg = tempfile.mkdtemp(prefix='tide-back-cfg-')
+        os.environ['TIDE_CONFIG_HOME'] = self.cfg
+        for name in ('a.py', 'b.py', 'c.py'):
+            with open(os.path.join(self.tmp, name), 'w') as f:
+                f.write('# %s\n' % name)
+        self.app = App(root=self.tmp, paths=[], out=io.StringIO())
+        self.app.screen = Screen(90, 20)
+        self.app.show_term = False
+        for name in ('a.py', 'b.py', 'c.py'):
+            self.app.open_file(os.path.join(self.tmp, name))
+            self.app.render()
+
+    def tearDown(self):
+        os.environ.pop('TIDE_CONFIG_HOME', None)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+        shutil.rmtree(self.cfg, ignore_errors=True)
+
+    def press(self):
+        from tide.keys import CTRL, Key
+        self.app.handle_key(Key('char', 't', CTRL))
+        self.app.render()
+
+    def here(self):
+        return self.app.editors[self.app.active].title
+
+    def test_it_goes_back_and_forth_between_two(self):
+        self.assertEqual(self.here(), 'c.py')
+        self.press()
+        self.assertEqual(self.here(), 'b.py')
+        self.press()
+        self.assertEqual(self.here(), 'c.py')
+        self.press()
+        self.assertEqual(self.here(), 'b.py')
+
+    def test_it_follows_wherever_you_were_last(self):
+        self.app.active = 0                      # as if clicked
+        self.app.render()
+        self.press()
+        self.assertEqual(self.here(), 'c.py', 'it did not remember the last one')
+
+    def test_closing_the_other_one_leaves_nothing_to_go_back_to(self):
+        self.press()                             # c -> b, so c is the partner
+        self.app.close_tab(self.app.editors.index(
+            [e for e in self.app.editors if e.title == 'c.py'][0]))
+        self.app.render()
+        where = self.here()
+        self.press()
+        self.assertEqual(self.here(), where, 'it jumped somewhere unasked')
+
+    def test_one_tab_alone_does_nothing(self):
+        while len(self.app.editors) > 1:
+            self.app.close_tab(0)
+            self.app.render()
+        where = self.here()
+        self.press()
+        self.assertEqual(self.here(), where)
+
+    def test_it_no_longer_opens_the_settings(self):
+        from tide.overlay import SettingsPanel
+        self.press()
+        self.assertNotIsInstance(self.app.overlay, SettingsPanel,
+                                 'ctrl+t still opens the settings')
+
+    def test_f9_still_opens_the_settings(self):
+        from tide.keys import Key
+        self.app.handle_key(Key('f9'))
+        from tide.overlay import SettingsPanel
+        self.assertIsInstance(self.app.overlay, SettingsPanel)
+
+    def test_shells_swap_with_shells(self):
+        self.app.new_big_terminal()
+        self.app.render()
+        self.app.new_big_terminal()
+        self.app.render()
+        self.assertEqual(self.app.main_view, 'terminal')
+        first = self.app.big_active
+        self.press()
+        self.assertNotEqual(self.app.big_active, first, 'the shells did not swap')
+        self.assertEqual(self.here(), 'c.py', 'it moved a file tab as well')
+        for term in self.app.big_terms:
+            term.stop()
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

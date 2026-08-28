@@ -66,6 +66,10 @@ class App(object):
         self._tree_indicator = False
         self.review = None           # the git review, when it is on screen
         self._review_focus = None    # what had the keyboard before it opened
+        self._seen_tab = None        # the tab in front of us, and the one
+        self._prev_tab = None        # before it, in each of the two groups
+        self._seen_term = None
+        self._prev_term = None
         self._pgid_names = {}        # foreground process group -> program name
         self._last_title_poll = 0.0
         self._hbar_showing = False
@@ -713,6 +717,46 @@ class App(object):
             self.big_active = min(index, len(self.big_terms) - 1)
         self.need_render = True
 
+    def _track_tabs(self):
+        """Remember what was in front of us, so ctrl+t can go back to it.
+
+        Watching here rather than at every place that changes a tab means
+        nothing can move without being noticed - opening, closing, clicking
+        and quick-open all pass through a repaint.
+        """
+        current = self.editors[self.active] if self.editors else None
+        if current is not self._seen_tab:
+            self._prev_tab, self._seen_tab = self._seen_tab, current
+        term = self.big_terms[self.big_active] if self.big_terms else None
+        if term is not self._seen_term:
+            self._prev_term, self._seen_term = self._seen_term, term
+
+    def switch_back(self):
+        """ctrl+t: back to the tab you were on before this one.
+
+        Files swap with files and shells with shells, whichever group you are
+        looking at; f2 is still the way across. With only one tab, or once the
+        other one has been closed, there is nothing to go back to.
+        """
+        if self.main_view == 'terminal':
+            group, previous = self.big_terms, self._prev_term
+        else:
+            group, previous = self.editors, self._prev_tab
+        if previous is None or previous not in group:
+            return False
+        index = group.index(previous)
+        if self.main_view == 'terminal':
+            if index == self.big_active:
+                return False
+            self.big_active = index
+        else:
+            if index == self.active:
+                return False
+            self.active = index
+        self.focus = 'editor'
+        self.need_render = True
+        return True
+
     def select_big_terminal(self, delta):
         if len(self.big_terms) > 1:
             self.big_active = (self.big_active + delta) % len(self.big_terms)
@@ -859,6 +903,7 @@ class App(object):
     # ---------------- rendering ----------------
     def render(self):
         scr = self.screen
+        self._track_tabs()
         r = self.layout()
         scr.clear(bg=theme.BG)
         cursor = None
@@ -1427,8 +1472,11 @@ class App(object):
         if combo == 'f8':
             self.open_git_diff(minimal=False)
             return
-        if combo in ('f9', 'ctrl+t', 'alt+,', 'ctrl+,'):
+        if combo in ('f9', 'alt+,', 'ctrl+,'):
             self.toggle_settings()
+            return
+        if combo == 'ctrl+t':
+            self.switch_back()
             return
         if combo == 'f2':
             self.toggle_main_view()

@@ -458,5 +458,62 @@ class TestTabDecorations(unittest.TestCase):
         self.assertIn('tracked.txt* M ', self.tab_row(), self.tab_row())
 
 
+class TestFolderColours(unittest.TestCase):
+    """A folder is bold; only git gives it a colour."""
+
+    def setUp(self):
+        import io
+        from tide.app import App
+        from tide.term import Screen
+        self.repo = make_repo(prefix='tide-folders-')
+        os.makedirs(os.path.join(self.repo, 'quiet'))
+        with open(os.path.join(self.repo, 'quiet', 'y.txt'), 'w') as f:
+            f.write('y\n')
+        git(self.repo, 'add', '-A')
+        git(self.repo, 'commit', '-q', '-m', 'more')
+        with open(os.path.join(self.repo, 'sub', 'nested.txt'), 'w') as f:
+            f.write('changed\n')                     # sub/ now has a change
+        self.cfg = tempfile.mkdtemp(prefix='tide-folders-cfg-')
+        os.environ['TIDE_CONFIG_HOME'] = self.cfg
+        self.app = App(root=self.repo, paths=[], out=io.StringIO())
+        self.app.screen = Screen(80, 16)
+        self.app.show_term = False
+        self.app.git.refresh(force=True)
+        self.app.tree.refresh()
+        self.app.render()
+
+    def tearDown(self):
+        os.environ.pop('TIDE_CONFIG_HOME', None)
+        shutil.rmtree(self.repo, ignore_errors=True)
+        shutil.rmtree(self.cfg, ignore_errors=True)
+
+    def row_for(self, name):
+        for y in range(1, self.app.rects['sidebar'].y2):
+            cells = self.app.screen.cells[y]
+            text = ''.join(c[0] or ' ' for c in cells[:26])
+            if name in text:
+                return cells
+        raise AssertionError('%s is not in the explorer' % name)
+
+    def test_an_untouched_folder_is_the_plain_colour_in_bold(self):
+        from tide import theme
+        from tide.term import BOLD
+        cells = self.row_for('quiet')
+        self.assertEqual(cells[3][1], theme.TREE_FILE,
+                         'an untouched folder is still coloured')
+        self.assertTrue(cells[3][3] & BOLD, 'it is not bold')
+
+    def test_a_folder_with_changes_keeps_its_git_colour(self):
+        from tide import theme
+        cells = self.row_for('sub')
+        self.assertEqual(cells[3][1], theme.git_colour('M'),
+                         'a changed folder lost its colour')
+
+    def test_files_are_not_bold(self):
+        from tide.term import BOLD
+        cells = self.row_for('tracked.txt')
+        self.assertFalse(cells[3][3] & BOLD)
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

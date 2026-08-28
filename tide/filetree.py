@@ -224,8 +224,8 @@ class FileTree(object):
             prefix = ' ' * (e.depth + 1)
             if e.is_dir:
                 mark = ('\u25be ' if e.path in self.expanded else '\u25b8 ')
-                fg = theme.TREE_DIR
-            else:
+                fg = theme.TREE_FILE       # a folder is bold, not coloured,
+            else:                          # unless git has something to say
                 mark = '  '
                 fg = theme.TREE_FILE
             git = self.app.git.status_for(e.path, e.is_dir) if self.app else None

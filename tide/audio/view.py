@@ -348,7 +348,18 @@ class AudioView(object):
                          '!  the file has been deleted', theme.ERROR, BOLD)
             self._centre(screen, rect, top + 11, kept, theme.FG_DIM, DIM)
         elif player.error:
+            from .player import no_sound_card
             self._centre(screen, rect, top + 10, player.error, theme.ERROR, 0)
+            if no_sound_card(player.error):
+                self._centre(screen, rect, top + 11,
+                             'this machine has no sound output - a server '
+                             'usually has none', theme.FG_DIM, DIM)
+                if self.remote():
+                    self._centre(screen, rect, top + 12,
+                                 'to hear it where you are sitting, run this '
+                                 'on your own machine:', theme.FG_DIM, DIM)
+                    self._centre(screen, rect, top + 13, self.local_hint(),
+                                 theme.FG, 0)
         return None
 
     def _bar(self, screen, left, y, width, player):
@@ -367,6 +378,19 @@ class AudioView(object):
         end = _clock(total)
         screen.put(left + width - len(end), y + 1, end, fg=theme.FG_DIM,
                    bg=theme.BG)
+
+    @staticmethod
+    def remote():
+        return bool(os.environ.get('SSH_CONNECTION') or os.environ.get('SSH_TTY'))
+
+    def local_hint(self):
+        """How to hear this file on the machine you are sitting at."""
+        import socket
+        try:
+            host = socket.gethostname().split('.')[0]
+        except Exception:
+            host = 'this-host'
+        return "ssh %s 'cat %s' | afplay -" % (host, self.path)
 
     @staticmethod
     def _centre(screen, rect, y, text, fg, attr):

@@ -83,6 +83,8 @@ def main(argv=None):
                     help='ask before opening a file with more lines')
     ap.add_argument('--max-mb', type=float, default=None, metavar='MB',
                     help='ask before opening a file bigger than this')
+    ap.add_argument('--audio-check', nargs='?', const='', metavar='FILE',
+                    help='say what will happen when a sound file is played')
     ap.add_argument('--update', nargs='?', const='', metavar='VERSION',
                     help='update the installed copy, to the newest code or to '
                          'a version, and exit')
@@ -96,6 +98,9 @@ def main(argv=None):
 
     if args.update is not None:
         return update(args.update)
+    if args.audio_check is not None:
+        from .audio.check import run as audio_check
+        return audio_check(args.audio_check or None)
 
     root = None
     files = []

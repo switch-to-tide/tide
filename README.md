@@ -140,8 +140,10 @@ Requires Python 3.7+ and a terminal that speaks xterm mouse reporting
   0.5, 1, 1.25, 1.5 and 2×. `space` plays and pauses, `←`/`→` move five
   seconds, `s` changes speed. Nothing about it can be edited.
 - It plays through whatever the machine already has, best first: `ffplay`,
-  `mpv`, `sox`, then **ffmpeg piped into whatever can make a noise** (`aplay`,
-  `pw-cat`, `afplay`) for servers that have ffmpeg but no player of their own,
+  `mpv`, `sox`, then **ffmpeg decoding into whatever can make a noise**
+  (`pacat`, `pw-cat`, `aplay`, `afplay`) — raw samples down the pipe at a
+  fixed rate, because a wav written to a pipe has no length in its header and
+  some players read that as an empty file and exit without a sound for servers that have ffmpeg but no player of their own,
   then `cvlc`, `afplay` (on every Mac), and finally the plain
   `paplay`/`pw-play`/`aplay`. Pausing signals the whole process group, so a
   pipeline stops as one; seeking restarts it at the new offset. Where the
@@ -154,6 +156,9 @@ Requires Python 3.7+ and a terminal that speaks xterm mouse reporting
   it again. Closing the tab throws that copy away, and it is gone for good.
   `ctrl+s` on a sound tab does nothing at all. If the file comes back, the
   warning clears and the new one is measured.
+- `tide --audio-check song.mp3` says what will happen before you wonder why
+  nothing did: what is installed, what was chosen, the exact command, whether
+  it stayed alive, and what it said if it did not.
 - Over ssh the sound comes out of the machine tide is running on — the tab
   says so. A terminal cannot do what VS Code does here, which is ship the
   bytes to the local Electron window and decode them there.
@@ -163,7 +168,7 @@ Requires Python 3.7+ and a terminal that speaks xterm mouse reporting
   binary and no line of this code runs.
 
 **Settings**
-- `f9`, `ctrl+t`, `alt+,`, or a click on **settings** in the top right — any of
+- `f9`, `alt+,`, or a click on **settings** in the top right — any of
   them open the settings panel: theme, auto-save and its delay,
   the size and line limits that trigger the "open anyway?" question, whether
   the terminal panel and explorer start visible, the default indent width, and
@@ -259,6 +264,8 @@ Requires Python 3.7+ and a terminal that speaks xterm mouse reporting
 - The preference is global, so it is there in the next repository you open.
 
 **Git**
+- Folders are bold rather than coloured, unless something inside them has
+  changed — then they take the colour of that change.
 - The explorer marks changed files the way VS Code does: `U` in green for new
   files, `M` in orange for modified ones, `D` for deleted, `A` for staged, `!`
   for conflicts. Folders containing changes are tinted too.
@@ -324,11 +331,12 @@ Press `f1` inside the app for this list.
 | click `x` on a tab | close it (middle-click works too) |
 | `ctrl+s` / `alt+s` | save / save as |
 | `alt+a` | toggle auto-save (on by default) |
-| `f9`, `ctrl+t`, `alt+,`, or click **settings** | settings panel |
+| `f9`, `alt+,`, or click **settings** | settings panel |
 | `f5` | split view: file and terminal side by side |
 | `f7` / `f8` | diff a modified file: changes only / whole file |
 | `f10`, or **review** | the whole working tree, as one review page (`esc` leaves) |
 | `alt+left` `alt+right` | previous / next tab |
+| `ctrl+t` | back to the tab you were on before (files with files, shells with shells) |
 | `ctrl+b` / `ctrl+j` | toggle explorer / bottom terminal panel |
 | `f2`, or the `Editor` / `Terminals` switch | switch the main area: editor <-> full-size terminal |
 | `f4` | new full-size terminal session |
@@ -390,7 +398,7 @@ running whether or not they are on screen.
 ## Tests
 
 ```sh
-python3 tests/run_all.py       # 678 tests, ~5 min
+python3 tests/run_all.py       # 694 tests, ~5 min
 python3 tests/test_units.py    # editing core, instant
 python3 tests/test_saving.py   # what lands on disk, instant
 python3 tests/test_durability.py   # quick exits, signals, lost terminals

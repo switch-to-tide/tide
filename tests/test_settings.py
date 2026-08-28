@@ -216,9 +216,9 @@ class TestSettingsPanel(unittest.TestCase):
         self.s.key(ESC + ',')
         self.assertIn('Theme', self.s.screen())
 
-    def test_ctrl_t_opens_and_closes_it(self):
-        self.s.key(chr(ord('t') - 96))
-        self.assertIn('Indent width', self.s.screen())
+    def test_ctrl_t_is_not_the_settings_any_more(self):
+        # it switches to the tab you were on before; the settings are f9,
+        # alt+, or the button in the top right
         self.s.key(chr(ord('t') - 96))
         self.assertNotIn('Indent width', self.s.screen())
 

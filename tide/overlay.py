@@ -391,6 +391,7 @@ HELP_TEXT = [
         ('ctrl+s / alt+s', 'save / save as'),
         ('alt+a', 'toggle auto-save (on by default)'),
         ('alt+left / alt+right', 'previous / next tab'),
+        ('ctrl+t', 'back to the tab you were on before'),
         ('ctrl+b', 'toggle explorer'),
     ]),
     ('Editing', [
@@ -423,6 +424,7 @@ HELP_TEXT = [
         ('Editor / Terminals', 'the switch above the tabs, in single view'),
         ('f4  or  click +', 'new full-size session'),
         ('alt+left / alt+right', 'previous / next session'),
+        ('ctrl+t', 'back to the session you were on before'),
         ('click x, or exit', 'close a session'),
     ]),
     ('Panes', [
@@ -460,7 +462,7 @@ HELP_TEXT = [
         ('big or binary files', 'the IDE asks before opening them'),
     ]),
     ('Other', [
-        ('f9, ctrl+t, alt+,', 'settings (appearance, theme, auto-save, limits)'),
+        ('f9, alt+,', 'settings (appearance, theme, auto-save, limits)'),
         ('click "settings"', 'the same panel, top right'),
         ('f1', 'this help'),
         ('ctrl+q', 'quit'),

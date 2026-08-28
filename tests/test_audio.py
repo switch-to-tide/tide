@@ -729,6 +729,105 @@ class TestBackends(unittest.TestCase):
             shutil.rmtree(folder, ignore_errors=True)
 
 
+class TestThePipeline(unittest.TestCase):
+    """What ffmpeg is asked to produce, and what happens when it fails."""
+
+    def setUp(self):
+        self.bin = tempfile.mkdtemp(prefix='tide-pipe-bin-')
+        self.tmp = tempfile.mkdtemp(prefix='tide-pipe-')
+        self.was_path = os.environ.get('PATH', '')
+        os.environ['PATH'] = self.bin
+        self.tone = write_tone(os.path.join(self.tmp, 'tone.wav'), seconds=4)
+        player_mod.forget()
+
+    def tearDown(self):
+        os.environ['PATH'] = self.was_path
+        player_mod.forget()
+        shutil.rmtree(self.bin, ignore_errors=True)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def script(self, name, body):
+        path = os.path.join(self.bin, name)
+        with open(path, 'w') as f:
+            f.write('#!/bin/sh\n%s\n' % body)
+        os.chmod(path, 0o755)
+        player_mod.forget()
+
+    def test_it_pipes_samples_not_a_headerless_wav(self):
+        self.script('ffmpeg', 'exec /bin/sleep 20')
+        self.script('aplay', 'exec /bin/sleep 20')
+        p = player_mod.Player(self.tone)
+        self.assertEqual(p.backend.name, 'ffmpeg|aplay')
+        feeder, sink = p.backend.build(self.tone, 0, 1.0)
+        self.assertIn('s16le', feeder, 'the decoder is not making raw samples')
+        self.assertNotIn('wav', feeder, 'a wav down a pipe has no length')
+        self.assertIn('-t', sink)
+        self.assertIn('raw', sink, 'the sink was not told what it is getting')
+        for flag in ('-r', '-c'):
+            self.assertIn(flag, sink, 'the sink was not told the format')
+
+    def test_a_sink_that_exits_happily_on_nothing_is_still_a_failure(self):
+        # exactly the shape of the bug: the decoder dies, the sink reads an
+        # empty pipe and exits 0, and it used to look like a finished file
+        self.script('ffmpeg', 'echo "ffmpeg: no such stream" >&2; exit 1')
+        self.script('aplay', '/bin/cat > /dev/null; exit 0')
+        p = player_mod.Player(self.tone)
+        try:
+            p.play(0.0)
+            for _ in range(30):
+                if p.finished():
+                    break
+                time.sleep(0.05)
+            self.assertTrue(p.finished())
+            self.assertLess(p.position(), p.duration - 1,
+                            'the bar jumped to the end of a file never played')
+            self.assertIsNotNone(p.error, 'it failed silently')
+            self.assertIn('ffmpeg', p.error, 'it did not say who failed')
+        finally:
+            p.stop()
+
+    def test_both_halves_are_stopped_together(self):
+        self.script('ffmpeg', 'exec /bin/sleep 20')
+        self.script('aplay', 'exec /bin/sleep 20')
+        p = player_mod.Player(self.tone)
+        p.play(0.0)
+        time.sleep(0.3)
+        feeder, sink = p._feeder, p._process
+        self.assertTrue(p.pause())
+        self.assertTrue(p.resume())
+        p.stop()
+        time.sleep(0.3)
+        self.assertIsNotNone(feeder.poll(), 'the decoder is still running')
+        self.assertIsNotNone(sink.poll(), 'the sink is still running')
+
+    def test_the_check_command_reports_a_broken_setup(self):
+        from tide.audio import check
+        self.script('ffmpeg', 'echo "ffmpeg: broken" >&2; exit 1')
+        self.script('aplay', '/bin/cat > /dev/null; exit 0')
+        was, sys.stdout = sys.stdout, io.StringIO()
+        try:
+            code = check.run(self.tone)
+            printed = sys.stdout.getvalue()
+        finally:
+            sys.stdout = was
+        self.assertEqual(code, 1, printed)
+        self.assertIn('ffmpeg|aplay', printed)
+        self.assertIn('it stopped after', printed)
+        self.assertIn('broken', printed, 'it did not pass on what was said')
+
+    def test_the_check_command_with_nothing_installed(self):
+        from tide.audio import check
+        was, sys.stdout = sys.stdout, io.StringIO()
+        try:
+            code = check.run(None)
+            printed = sys.stdout.getvalue()
+        finally:
+            sys.stdout = was
+        self.assertEqual(code, 1)
+        self.assertIn('nothing can play sound here', printed)
+        self.assertIn('ffmpeg', printed)
+
+
 class TestStress(AudioTest):
     def test_a_hundred_starts_and_stops_leak_nothing(self):
         app = self.app()

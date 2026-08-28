@@ -6,7 +6,7 @@ Versions are tagged in git as `v0.1.0` and so on, and the installer takes one:
 curl -fsSL https://raw.githubusercontent.com/switch-to-tide/tide/main/install.sh | sh -s -- 0.1.0
 ```
 
-## 0.1.5 — unreleased
+## 0.1.6 — unreleased
 
 - A sound file deleted while its tab is open no longer trips anything up: the
   tab warns, its name picks up a red `!` beside it, and it keeps playing from
@@ -21,6 +21,28 @@ curl -fsSL https://raw.githubusercontent.com/switch-to-tide/tide/main/install.sh
   the process group, so a pipeline stops and starts as one.
 - The tab says when you are over ssh, because then the sound comes out of the
   machine tide is running on.
+- **Fixed audio failing silently.** A player that cannot open a sound device
+  often exits with a success status - ffplay on a machine with no sound card
+  does exactly that - so the bar ran to the end and nothing said why. Any
+  player that stops well before the end is now a failure whatever its status,
+  and the tab shows what it said. When that message is a machine with nowhere
+  to send sound, the tab says so, and over ssh it shows the command to hear
+  the file on the machine you are sitting at.
+- **Fixed audio on Linux**: with ffmpeg but no ffplay, tide piped a wav into
+  `aplay`, and a wav on a pipe carries no length - the sink read it as an
+  empty file and exited happily, so the bar jumped to the end and nothing
+  played. The pipe now carries raw samples at a fixed rate, the two programs
+  run as two children rather than through a shell so a failure can be
+  attributed, and a player that stops well before the end is treated as a
+  failure whatever its exit status - with whatever it said on the way out
+  shown in the tab.
+- `tide --audio-check [FILE]` prints what is installed, which player was
+  chosen, the exact command, and what happened when it ran.
+- `ctrl+t` goes back to the tab you were on before, files among files and
+  shells among shells; `f2` still crosses between them. The settings panel is
+  `f9`, `alt+,` or the button, as it always was.
+- Folders in the explorer are bold rather than blue, unless git has something
+  to say about what is inside them.
 - **Audio playback now starts off**, since it needs a player no operating
   system ships. Turning it on checks the machine once: with ffmpeg or mpv it
   turns on; with only a plain player it asks whether to use that (no seeking,
