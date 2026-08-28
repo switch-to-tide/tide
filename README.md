@@ -112,7 +112,14 @@ Requires Python 3.7+ and a terminal that speaks xterm mouse reporting
 - **Guard rails on opening**: a file over 2 MB or 20,000 lines, or one that
   looks binary, asks before it opens; anything that is not valid UTF-8 opens
   read-only so it cannot be corrupted by a save.
-- Tabs with an unsaved marker and an `x` close button, fuzzy quick-open. When
+- Tabs carry the same git decoration as the explorer: `M` in orange for a
+  modified file, `U` in green for a new one, greyed out when git is told to
+  ignore it. The unsaved `*` keeps its own slot beside it.
+- Tabs with an unsaved marker and an `x` close button, fuzzy quick-open. Two
+  open files with the same name pick up as much of their folders as it takes
+  to tell them apart (`alpha/models/schema.py`), and a name too long for a tab
+  is cropped with `…` — the end for a plain name, the front for a path, so the
+  filename is always the part you keep. The explorer crops the same way. When
   there are more tabs than fit, the strip crops with `<` and `>` at the edges;
   the wheel over it scrolls through them, and switching tabs brings the new one
   into view. Editor tabs and terminal tabs scroll independently.
@@ -221,6 +228,10 @@ Requires Python 3.7+ and a terminal that speaks xterm mouse reporting
   work, because each panel is a VT100/xterm emulator.
 - A small panel docked at the bottom (`ctrl+j`), always the same session —
   drag its `TERMINAL` bar to resize it.
+- Each terminal tab is named after whatever it is running — `sh`, `python3`,
+  `uv run`, `claude`, `git log` — and goes back to the shell's name when the
+  command finishes. The name comes from the pty's foreground process group, so
+  it costs one `ps` per command, not one per frame.
 - **Full-size sessions** that take over the editor area: `f2` or the
   `Editor` / `Terminals` switch in the top bar flips between them, `f4` or the
   `+` tab starts another, `alt+left` / `alt+right` or a click on a tab moves
@@ -319,7 +330,7 @@ running whether or not they are on screen.
 ## Tests
 
 ```sh
-python3 tests/run_all.py       # 506 tests, ~4 min
+python3 tests/run_all.py       # 527 tests, ~4 min
 python3 tests/test_units.py    # editing core, instant
 python3 tests/test_saving.py   # what lands on disk, instant
 python3 tests/test_durability.py   # quick exits, signals, lost terminals
@@ -330,6 +341,7 @@ python3 tests/test_sync.py     # vim / assistants / git writing the same file
 python3 tests/test_workflows.py    # whole sessions, and a no-silent-loss property
 python3 tests/test_filesystem.py   # odd content, odd names, odd file types, failed writes
 python3 tests/test_panes.py    # dividers, tree scrolling, the sideways bar
+python3 tests/test_names.py    # what tabs are called, and cropping
 python3 tests/test_update.py   # tide --update, including from inside tide
 ```
 

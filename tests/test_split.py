@@ -301,7 +301,7 @@ class TestSplitInTheUI(unittest.TestCase):
         self.s.pump(1.2)
         row = self.tabs()
         self.assertIn('code.py', row, 'the file tabs are missing')
-        self.assertIn('terminal 1', row, 'the terminal tabs are missing')
+        self.assertIn('sh', row, 'the terminal tabs are missing')
         self.assertIn('|', row, 'no separator between the two strips')
         top = self.s.line(0)[26:]
         self.assertNotIn('Editor', top, 'the switch is still there in split view')
@@ -328,7 +328,7 @@ class TestSplitInTheUI(unittest.TestCase):
         self.s.type('TYPED ')
         self.s.pump(0.4)
         self.assertIn('TYPED ', self.s.screen(), 'the file half did not take it')
-        column = 26 + self.tabs().index('terminal 1')
+        column = 26 + self.tabs().index('sh')
         self.s.click(column + 2, self.s.TAB_ROW)
         self.s.pump(0.4)
         self.s.type('echo FROM_THE_TAB' + ENTER)
@@ -366,7 +366,7 @@ class TestSplitInTheUI(unittest.TestCase):
         self.s.pump(0.6)
         self.s.key(ESC + 'OS')                    # f4: the new shell takes focus
         self.s.pump(1.2)
-        self.assertIn('terminal 1', self.tabs())
+        self.assertIn('sh', self.tabs())
         self.assertIn('Terminal 1/1', self.s.screen())
         self.assertIn('row 0', self.s.screen(), 'the file half disappeared')
         self.s.key(F2)                            # back to the file half
@@ -376,7 +376,7 @@ class TestSplitInTheUI(unittest.TestCase):
         self.assertTrue(self.right_half_is_a_terminal(), 'the layout changed')
         self.s.key(F2)
         self.s.pump(0.4)
-        self.assertIn('terminal 1', self.tabs())
+        self.assertIn('sh', self.tabs())
         self.assertTrue(self.right_half_is_a_terminal())
 
     def test_the_file_keeps_its_place_across_a_toggle(self):

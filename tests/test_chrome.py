@@ -208,12 +208,12 @@ class TestTabStrip(unittest.TestCase):
         for _ in range(5):
             self.s.key(F4)
         self.s.pump(1.2)
-        self.assertIn('terminal', self.tabs())
+        self.assertIn('sh 6', self.tabs(), 'the terminals are not all there')
         self.s.wheel(60, self.s.TAB_ROW, up=True, times=4)
-        self.assertIn('terminal 1', self.tabs(), 'the terminal strip did not scroll')
+        self.assertIn(' sh  x ', self.tabs(), 'the terminal strip did not scroll')
         self.s.key(ESC + 'OQ')               # f2, back to the file tabs
         self.s.pump(0.5)
-        self.assertNotIn('terminal', self.tabs(), 'the strips share an offset')
+        self.assertNotIn(' sh  x ', self.tabs(), 'the strips share an offset')
         self.assertIn('.py', self.tabs())
 
     def test_it_works_in_split_view_too(self):

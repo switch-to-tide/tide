@@ -23,6 +23,14 @@ curl -fsSL https://raw.githubusercontent.com/switch-to-tide/tide/main/install.sh
   inside an open one is marked with a faint line down the indent.
 - Files scroll sideways no further than their widest line, with a scrollbar
   along the bottom of the pane while you do it.
+- Terminal tabs are named after what they are running — `python3`, `uv run`,
+  `claude` — instead of `terminal 1`, `terminal 2`.
+- File tabs show the git status the explorer shows: the same letter, the same
+  colour, and the same grey for ignored files.
+- Two open files with the same name now show enough of their folders to tell
+  them apart, the way VS Code does it.
+- Names too long for a tab or for the explorer are cropped with `…` rather
+  than cut off flat, keeping the filename rather than the path.
 - `tide --version` now says `tide`, not `terminal_ide`.
 
 ## 0.1.0 — 2026-08-28

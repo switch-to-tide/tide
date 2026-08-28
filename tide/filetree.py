@@ -3,7 +3,7 @@
 import os
 import time
 
-from . import theme
+from . import names, theme
 from .term import BOLD, Rect
 
 IGNORE_DIRS = {'.git', '__pycache__', 'node_modules', '.venv', 'venv', '.mypy_cache',
@@ -235,8 +235,10 @@ class FileTree(object):
                 git = None
             elif git:
                 fg = theme.git_colour(git)
-            label = prefix + mark + e.name
-            screen.put(rect.x, y, label[:rect.w], fg=fg, bg=bg,
+            room = max(1, edge - 1 - rect.x - len(prefix) - len(mark) -
+                       (2 if git and not e.is_dir else 0))
+            label = prefix + mark + names.crop(e.name, room)
+            screen.put(rect.x, y, label, fg=fg, bg=bg,
                        attr=0 if ignored else (BOLD if e.is_dir else 0),
                        max_x=edge - 1)
             for level in range(e.depth):   # one line down each open folder

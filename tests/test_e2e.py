@@ -428,15 +428,14 @@ class TestFullSizeTerminal(IDETest):
     def test_plus_tab_adds_and_close_button_removes(self):
         self.s.key(F2)
         self.s.key(F4)
-        self.assertIn('terminal 2', self.s.line(self.s.TAB_ROW))
+        self.assertIn('sh 2', self.s.line(self.s.TAB_ROW))
         self.s.click_plus()
         self.assertIn('Terminal 3/3', self.s.screen())
-        self.s.click_tab_close('terminal 2')             # the x button
-        self.assertNotIn('terminal 2', self.s.line(self.s.TAB_ROW))
-        self.assertIn('terminal 3', self.s.line(self.s.TAB_ROW))
-        self.s.click_tab('terminal 1', button=1)         # middle-click still closes
-        self.assertNotIn('terminal 1', self.s.line(self.s.TAB_ROW))
+        self.s.click_tab_close('sh 3')                   # the x button
+        self.assertIn('Terminal 2/2', self.s.screen())
+        self.s.click_tab('sh 2', button=1)               # middle-click still closes
         self.assertIn('Terminal 1/1', self.s.screen())
+        self.assertNotIn('sh 2', self.s.line(self.s.TAB_ROW))
 
     def test_exit_closes_the_session(self):
         self.s.key(F2)
@@ -445,7 +444,7 @@ class TestFullSizeTerminal(IDETest):
         self.assertIn('Terminal 1/1', self.s.screen())
         self.s.type('exit' + ENTER, settle=0.7)
         self.assertIn('def greet', self.s.screen())      # last one closed -> editor
-        self.assertNotIn('terminal 1', self.s.line(self.s.TAB_ROW))
+        self.assertNotIn(' sh ', self.s.line(self.s.TAB_ROW))
 
     def test_hidden_session_keeps_running(self):
         self.s.key(F2)
@@ -567,10 +566,10 @@ class TestScrolling(IDETest):
         self.assertTrue(self.s.wait_for('TWO_60'))
         second = [l[26:].strip() for l in self.s.text()[2:6]]
         self.assertNotEqual(first, second)
-        self.s.click_tab('terminal 1')
+        self.s.click_tab('sh')
         self.assertEqual([l[26:].strip() for l in self.s.text()[2:6]], first,
                          'session 1 lost its scrollback position')
-        self.s.click_tab('terminal 2')
+        self.s.click_tab('sh 2')
         self.assertEqual([l[26:].strip() for l in self.s.text()[2:6]], second)
 
 

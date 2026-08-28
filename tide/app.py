@@ -13,6 +13,7 @@ from .editor import Editor
 from .diff import DiffView, buffer_source, disk_source, head_source, rev_source
 from .filetree import FileTree, IGNORE_DIRS, IGNORE_FILES
 from .git import Git
+from . import names as tabnames
 from .keys import ALT, CTRL, SHIFT, Decoder, Key, Mouse, Paste
 from .overlay import Confirm, Help, Prompt, SettingsPanel
 from .term import BOLD, DIM, RawTerminal, Rect, Screen
@@ -61,6 +62,8 @@ class App(object):
         self.term_h_user_set = False
         self.sidebar_w = SIDEBAR_W
         self._tree_indicator = False
+        self._pgid_names = {}        # foreground process group -> program name
+        self._last_title_poll = 0.0
         self._hbar_showing = False
         self.focus = 'editor'
         self.overlay = None
@@ -564,6 +567,7 @@ class App(object):
         rect = self.rects.get('editor') if self.rects else None
         term.start(rect.w if rect else 80, rect.h if rect else 24)
         self.big_terms.append(term)
+        self._last_title_poll = 0.0        # name it as soon as it has a shell
         self.big_active = len(self.big_terms) - 1
         self.main_view = 'terminal'
         self.focus = 'editor'
@@ -673,6 +677,24 @@ class App(object):
         self.message = msg
         self.message_time = time.time()
         self.need_render = True
+
+    def refresh_terminal_titles(self):
+        """Name each terminal after whatever it is running."""
+        now = time.time()
+        if now - self._last_title_poll < 0.6:
+            return
+        self._last_title_poll = now
+        panels = list(self.big_terms)
+        if self.show_term:
+            panels.append(self.terminal)
+        for panel in panels:
+            shell = panel.shell
+            if shell is None or shell.fd is None or shell.exited:
+                continue
+            found = tabnames.foreground(shell.fd, shell.pid, self._pgid_names)
+            if found and found != panel.program:
+                panel.program = found
+                self.need_render = True
 
     def _sideways_bar_showing(self):
         """Whether the pane on screen is drawing its sideways scrollbar."""
@@ -834,6 +856,37 @@ class App(object):
             self._render_strip(
                 scr, rect, 'terminal' if self.main_is_terminal() else 'editor')
 
+    def editor_titles(self):
+        """Tab names: the file, plus folders where two of them share a name."""
+        paths = [getattr(ed, 'path', None) for ed in self.editors]
+        labels = tabnames.titles(paths)
+        return [tabnames.tab_label(labels[i] or ed.title)
+                for i, ed in enumerate(self.editors)]
+
+    def tab_git_marks(self):
+        """(letter, colour) per editor tab, matching the explorer's marks."""
+        git = getattr(self, 'git', None)
+        if git is None or not git.enabled:
+            return [None] * len(self.editors)
+        out = []
+        for ed in self.editors:
+            path = getattr(ed, 'path', None)
+            status = git.status_for(path, False) if path else None
+            if path and git.is_ignored(path):
+                out.append(('', theme.GIT_IGNORED))     # greyed, and no letter
+                continue
+            out.append((status, theme.git_colour(status)) if status else None)
+        return out
+
+    def terminal_titles(self):
+        """Tab names: the program each is running, numbered if two match."""
+        labels, seen = [], {}
+        for term in self.big_terms:
+            name = term.tab_title()
+            seen[name] = seen.get(name, 0) + 1
+            labels.append(name if seen[name] == 1 else '%s %d' % (name, seen[name]))
+        return [tabnames.tab_label(lb) for lb in labels]
+
     def _render_strip(self, scr, rect, strip):
         """One row of tabs, cropped to its own space and scrollable."""
         if rect.w < 4:
@@ -841,15 +894,20 @@ class App(object):
         terminals = strip == 'terminal'
         focused = self.main_is_terminal() == terminals
         if terminals:
-            names = [t.title for t in self.big_terms]
+            names = self.terminal_titles()
             active_i = self.big_active
             marks = [False] * len(names)
         else:
-            names = [ed.title for ed in self.editors]
+            names = self.editor_titles()
             active_i = self.active
             marks = [ed.doc.dirty for ed in self.editors]
-        # ' name* x ' - the marker slot keeps its width so tabs never jump
-        labels = [' %s%s x ' % (n, '*' if marks[i] else ' ') for i, n in enumerate(names)]
+        # ' name* M x ' - the marker and git slots keep their width so that
+        # tabs never jump about as files change underneath them
+        marks_git = self.tab_git_marks() if not terminals else [None] * len(names)
+        gap = ' ' if any(m is not None for m in marks_git) else ''
+        labels = [' %s%s%s x ' % (n, '*' if marks[i] else ' ',
+                                  (gap + ' ') if gap else '')
+                  for i, n in enumerate(names)]
         widths = [len(lb) for lb in labels]
         plus = ' + ' if terminals else ''
         total = sum(widths) + len(plus)
@@ -876,12 +934,19 @@ class App(object):
             fg = theme.TAB_ACTIVE_FG if active else theme.TAB_FG
             if active and not focused:
                 fg = theme.FG_DIM          # the half that does not have the keyboard
+            if marks_git[i]:               # coloured like the explorer's entry
+                fg = marks_git[i][1]
             left = max(rect.x, tx)
             if tx + widths[i] > rect.x and tx < rect.x2:
                 scr.fill(left, rect.y, min(tx + widths[i], rect.x2) - left, 1, bg=bg)
                 scr.put(tx, rect.y, label, fg=fg, bg=bg, attr=BOLD if active else 0,
                         max_x=rect.x2, min_x=rect.x)
-                mark_x = tx + widths[i] - 4
+                if gap:
+                    letter, colour = marks_git[i] or (None, None)
+                    git_x = tx + widths[i] - 4
+                    if letter and rect.x <= git_x < rect.x2:
+                        scr.put(git_x, rect.y, letter, fg=colour, bg=bg, attr=BOLD)
+                mark_x = tx + widths[i] - (6 if gap else 4)
                 if marks[i] and rect.x <= mark_x < rect.x2:
                     scr.put(mark_x, rect.y, '*', fg=theme.TAB_MARK, bg=bg, attr=BOLD)
                 close_x = tx + widths[i] - 2
@@ -938,7 +1003,7 @@ class App(object):
         if self.message and time.time() - self.message_time < MESSAGE_SECONDS:
             left = self.message
         elif self.main_is_terminal():
-            left = self.big_term().title
+            left = self.big_term().tab_title()
         elif ed is not None and ed.is_diff:
             left = ed.title
         elif ed:
@@ -1516,6 +1581,7 @@ class App(object):
                 if not self.running:
                     break
         self.autosave_tick()
+        self.refresh_terminal_titles()
         self.check_disk_changes()
         self.refresh_git()
         self.refresh_diffs()

@@ -22,6 +22,7 @@ class TerminalPanel(object):
         self.cwd = cwd or os.getcwd()
         self.header = header
         self.title = title
+        self.program = None            # what the shell is running right now
         self.shell = None
         self.vt = VT(80, 10)
         self.rect = Rect(0, 0, 1, 1)
@@ -179,6 +180,10 @@ class TerminalPanel(object):
             out.append(text[s:e].rstrip())
         return '\n'.join(out)
 
+    def tab_title(self):
+        """What the tab says: the program running, or the name we gave it."""
+        return self.program or self.title
+
     # ---------------- painting ----------------
     def _render_header(self, screen, rect, focused):
         y = rect.y
@@ -186,7 +191,7 @@ class TerminalPanel(object):
         label = ' %s ' % self.title
         screen.put(rect.x, y, label, fg=theme.FG if focused else theme.FG_DIM,
                    bg=theme.PANEL_ALT, attr=BOLD)
-        info = os.path.basename(os.environ.get('SHELL', 'sh'))
+        info = self.program or os.path.basename(os.environ.get('SHELL', 'sh'))
         if self.shell and self.shell.exited:
             info = 'exited - press Enter to restart'
         elif self.scroll:

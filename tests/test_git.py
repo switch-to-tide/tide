@@ -373,5 +373,90 @@ class TestGitInTheUI(unittest.TestCase):
             shutil.rmtree(plain, ignore_errors=True)
 
 
+class TestTabDecorations(unittest.TestCase):
+    """File tabs carry the same letter and colour as the explorer."""
+
+    def setUp(self):
+        import io
+        from tide.app import App
+        from tide.term import Screen
+        self.repo = make_repo()
+        with open(os.path.join(self.repo, '.gitignore'), 'w') as f:
+            f.write('*.log\n')
+        git(self.repo, 'add', '-A')
+        git(self.repo, 'commit', '-q', '-m', 'ignore logs')
+        with open(os.path.join(self.repo, 'tracked.txt'), 'w') as f:
+            f.write(COMMITTED + 'five\n')                 # modified
+        for name, text in (('fresh.txt', 'new\n'), ('noise.log', 'x\n')):
+            with open(os.path.join(self.repo, name), 'w') as f:
+                f.write(text)
+        self.cfg = tempfile.mkdtemp(prefix='tide-tabgit-cfg-')
+        os.environ['TIDE_CONFIG_HOME'] = self.cfg
+        self.app = App(root=self.repo, paths=[], out=io.StringIO())
+        self.app.screen = Screen(110, 24)
+        self.app.show_term = False
+        for name in ('tracked.txt', 'fresh.txt', 'noise.log', 'sub/nested.txt'):
+            self.app.open_file(os.path.join(self.repo, name))
+        self.app.git.refresh(force=True)
+        self.app.tree.refresh()
+        self.app.render()
+
+    def tearDown(self):
+        os.environ.pop('TIDE_CONFIG_HOME', None)
+        shutil.rmtree(self.repo, ignore_errors=True)
+        shutil.rmtree(self.cfg, ignore_errors=True)
+
+    def tab_row(self):
+        return ''.join(c[0] or ' ' for c in self.app.screen.cells[1])
+
+    def tab_colour(self, name):
+        row = self.tab_row()
+        return self.app.screen.cells[1][row.index(name)][1]
+
+    def tree_colour(self, name):
+        for y in range(1, self.app.rects['sidebar'].y2):
+            cells = self.app.screen.cells[y]
+            if name in ''.join(c[0] or ' ' for c in cells[:26]):
+                return cells[3][1]
+        return None
+
+    def test_the_letters_are_on_the_tabs(self):
+        row = self.tab_row()
+        self.assertIn('tracked.txt  M ', row, row)
+        self.assertIn('fresh.txt  U ', row, row)
+
+    def test_the_colours_match_the_explorer(self):
+        for name in ('tracked.txt', 'fresh.txt'):
+            self.assertEqual(self.tab_colour(name), self.tree_colour(name),
+                             '%s is a different colour in the two places' % name)
+
+    def test_an_unchanged_file_gets_no_letter(self):
+        row = self.tab_row()
+        self.assertIn('nested.txt   ', row, row)
+        self.assertNotEqual(self.tab_colour('nested.txt'),
+                            self.tab_colour('tracked.txt'))
+
+    def test_an_ignored_file_is_greyed_with_no_letter(self):
+        from tide import theme
+        row = self.tab_row()
+        self.assertIn('noise.log   ', row, row)
+        self.assertEqual(self.tab_colour('noise.log'), theme.GIT_IGNORED)
+        self.assertEqual(self.tab_colour('noise.log'), self.tree_colour('noise.log'))
+
+    def test_the_letter_follows_the_file(self):
+        with open(os.path.join(self.repo, 'tracked.txt'), 'w') as f:
+            f.write(COMMITTED)                            # put it back
+        self.app.git.refresh(force=True)
+        self.app.render()
+        self.assertNotIn('tracked.txt  M ', self.tab_row())
+
+    def test_the_unsaved_marker_still_has_its_own_slot(self):
+        editor = self.app.editors[0]
+        editor.doc.cursor = (0, 0)
+        editor.doc.insert('x')
+        self.app.render()
+        self.assertIn('tracked.txt* M ', self.tab_row(), self.tab_row())
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

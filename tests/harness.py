@@ -142,7 +142,12 @@ class Session(object):
 
     def tab_pos(self, label):
         """x of a tab label in the tab row (rightmost match clears the sidebar)."""
-        return self.line(self.TAB_ROW).rfind(label)
+        row = self.line(self.TAB_ROW)
+        for shape in (' %s  x ', ' %s* x '):     # a whole tab, not a prefix of one
+            at = row.rfind(shape % label)
+            if at >= 0:
+                return at + 1
+        return row.rfind(label)
 
     def click_tab(self, label, button=0):
         x = self.tab_pos(label)
