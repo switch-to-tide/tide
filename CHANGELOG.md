@@ -6,7 +6,25 @@ Versions are tagged in git as `v0.1.0` and so on, and the installer takes one:
 curl -fsSL https://raw.githubusercontent.com/switch-to-tide/tide/main/install.sh | sh -s -- 0.1.0
 ```
 
-## 0.1.4 — unreleased
+## 0.1.5 — unreleased
+
+- A sound file deleted while its tab is open no longer trips anything up: the
+  tab warns, its name picks up a red `!` beside it, and it keeps playing from
+  a copy taken while the file was still there - so you can pause, seek and
+  replay until you close the tab, and then it is gone. If the file comes back,
+  the warning clears and the new one is measured.
+- Fixed a crash on Linux when the disk watcher reached a sound tab: it asked
+  the tab for things only a text document has. Sound tabs now watch their own
+  file and are left out of that loop.
+- More ways to make a noise: ffmpeg piped into `aplay`, `pw-cat` or `afplay`,
+  for machines that have ffmpeg but no player of their own. Pausing signals
+  the process group, so a pipeline stops and starts as one.
+- The tab says when you are over ssh, because then the sound comes out of the
+  machine tide is running on.
+- In the modern appearance the open tab has a background of its own again, so
+  you can see which file or shell you are looking at.
+
+## 0.1.4 — 2026-08-28
 
 - **Audio playback.** Sound files open in their own tab with a play button, a
   bar you can click or drag to seek, and speeds of 0.5, 1, 1.25, 1.5 and 2×.

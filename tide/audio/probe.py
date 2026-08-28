@@ -115,7 +115,7 @@ def trim(path, start):
             data = src.readframes(frames - skip)
             params = (src.getnchannels(), src.getsampwidth(), rate,
                       frames - skip, src.getcomptype(), src.getcompname())
-        handle, out = tempfile.mkstemp(prefix='tide-audio-',
+        handle, out = tempfile.mkstemp(prefix='tide-play-',
                                        suffix=os.path.splitext(path)[1])
         os.close(handle)
         with module.open(out, 'wb') as dst:

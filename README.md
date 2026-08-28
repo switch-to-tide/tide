@@ -133,12 +133,23 @@ Requires Python 3.7+ and a terminal that speaks xterm mouse reporting
   0.5, 1, 1.25, 1.5 and 2×. `space` plays and pauses, `←`/`→` move five
   seconds, `s` changes speed. Nothing about it can be edited.
 - It plays through whatever the machine already has, best first: `ffplay`,
-  `mpv`, `afplay` (on every Mac), `sox`, `cvlc`, then the plain
-  `paplay`/`pw-play`/`aplay`. Pausing is a `SIGSTOP` to that process; seeking
-  restarts it at the new offset. Where the player cannot seek — `afplay`
-  cannot — a trimmed temporary copy stands in for the formats the standard
-  library can rewrite, so a `.wav` seeks on a bare Mac and an `.mp3` asks you
-  to install ffmpeg.
+  `mpv`, `sox`, then **ffmpeg piped into whatever can make a noise** (`aplay`,
+  `pw-cat`, `afplay`) for servers that have ffmpeg but no player of their own,
+  then `cvlc`, `afplay` (on every Mac), and finally the plain
+  `paplay`/`pw-play`/`aplay`. Pausing signals the whole process group, so a
+  pipeline stops as one; seeking restarts it at the new offset. Where the
+  player cannot seek — `afplay` cannot — a trimmed temporary copy stands in
+  for the formats the standard library can rewrite, so a `.wav` seeks on a
+  bare Mac.
+- **If the file is deleted while it is open**, the tab says so, gets a red `!`
+  beside its name in the tab strip, and goes on playing: an open handle keeps
+  the bytes alive, and a copy is taken so you can still pause, seek and play
+  it again. Closing the tab throws that copy away, and it is gone for good.
+  `ctrl+s` on a sound tab does nothing at all. If the file comes back, the
+  warning clears and the new one is measured.
+- Over ssh the sound comes out of the machine tide is running on — the tab
+  says so. A terminal cannot do what VS Code does here, which is ship the
+  bytes to the local Electron window and decode them there.
 - It costs nothing when you are not using it: the module is imported the first
   time an audio file is opened, the screen only repaints while something is
   actually playing, and the **Audio playback** setting turns the whole thing
@@ -373,7 +384,7 @@ running whether or not they are on screen.
 ## Tests
 
 ```sh
-python3 tests/run_all.py       # 631 tests, ~5 min
+python3 tests/run_all.py       # 661 tests, ~5 min
 python3 tests/test_units.py    # editing core, instant
 python3 tests/test_saving.py   # what lands on disk, instant
 python3 tests/test_durability.py   # quick exits, signals, lost terminals

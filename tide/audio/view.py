@@ -7,13 +7,19 @@ paints and tells to stop when the tab closes.
 """
 
 import os
+import shutil
+import tempfile
+import time
 
 from .. import theme
 from ..term import BOLD, DIM, Rect
+from . import probe
 from .player import Player
 
 SPEEDS = [0.5, 1.0, 1.25, 1.5, 2.0]
 STEP = 5.0                       # seconds an arrow key moves
+CHECK_EVERY = 0.8                # how often the file is looked for
+RESCUE_LIMIT = 512 * 1024 * 1024  # do not copy more than this to save a file
 
 
 def _clock(seconds):
@@ -39,6 +45,25 @@ class _AudioDoc(object):
 
     def selection(self):
         return None
+
+    # the app never watches or saves a sound tab, but a document is asked
+    # these things in enough places that answering plainly is safer than
+    # trusting every caller to check first
+    def disk_status(self):
+        return 'same' if os.path.exists(self.path) else 'missing'
+
+    def text(self):
+        return ''
+
+    def file_key(self):
+        try:
+            st = os.stat(self.path)
+        except OSError:
+            return None
+        return (st.st_dev, st.st_ino)
+
+    def save(self, path=None, force=False):
+        raise IOError('a sound file is not text')
 
 
 class _Lang(object):
@@ -70,6 +95,103 @@ class AudioView(object):
         self.bar_span = None
         self.speed_span = None
         self.dragging = False
+        self.missing = False
+        self.rescued = None          # our own copy, once the file is deleted
+        self._checked = 0.0
+        self._stamp = self._disk_stamp()
+        # an open handle keeps the bytes alive on disk even if the file is
+        # unlinked, which is what lets a deleted file go on playing
+        try:
+            self._fd = os.open(self.path, os.O_RDONLY)
+        except OSError:
+            self._fd = None
+
+    # ---------------- the file underneath ----------------
+    def _disk_stamp(self):
+        try:
+            st = os.stat(self.path)
+        except OSError:
+            return None
+        return (st.st_ino, st.st_size,
+                getattr(st, 'st_mtime_ns', int(st.st_mtime * 1e9)))
+
+    def check_disk(self, force=False):
+        """Notice the file going away, or coming back as something else."""
+        now = time.time()
+        if not force and now - self._checked < CHECK_EVERY:
+            return False
+        self._checked = now
+        stamp = self._disk_stamp()
+        if stamp is None:
+            return self._went_missing()
+        if self.missing or stamp != self._stamp:
+            return self._came_back(stamp)
+        return False
+
+    def _went_missing(self):
+        if self.missing:
+            return False
+        self.missing = True
+        self._rescue()               # so it can still be played and replayed
+        return True
+
+    def _came_back(self, stamp):
+        """The file is there again - the same one, or a new one in its place."""
+        was_missing = self.missing
+        self._stamp = stamp
+        self.missing = False
+        self._drop_rescue()
+        try:
+            if self._fd is not None:
+                os.close(self._fd)
+        except OSError:
+            pass
+        try:
+            self._fd = os.open(self.path, os.O_RDONLY)
+        except OSError:
+            self._fd = None
+        self.player.use_source(self.path)
+        self.player.duration = probe.duration(self.path)
+        if not was_missing and self.player.playing:
+            return True              # it was rewritten under us; carry on
+        return True
+
+    def _rescue(self):
+        """Copy what is still open into a file of our own, while we can."""
+        if self._fd is None or self.rescued:
+            return
+        try:
+            size = os.fstat(self._fd).st_size
+            if size > RESCUE_LIMIT:
+                return
+            handle, out = tempfile.mkstemp(prefix='tide-kept-',
+                                           suffix=os.path.splitext(self.path)[1])
+            os.lseek(self._fd, 0, os.SEEK_SET)
+            with os.fdopen(handle, 'wb') as target:
+                while True:
+                    chunk = os.read(self._fd, 1 << 20)
+                    if not chunk:
+                        break
+                    target.write(chunk)
+        except Exception:
+            self._drop_rescue()
+            return
+        self.rescued = out
+        self.player.use_source(out)   # everything from here plays the copy
+
+    def _drop_rescue(self):
+        if self.rescued:
+            try:
+                os.remove(self.rescued)
+            except OSError:
+                pass
+            self.rescued = None
+        self.player.use_source(self.path)
+
+    def tab_mark(self):
+        """What the tab strip should show beside the name."""
+        self.check_disk()
+        return ('!', theme.ERROR) if self.missing else None
 
     # ---------------- what the app asks of a tab ----------------
     def refresh(self, force=False):
@@ -77,13 +199,29 @@ class AudioView(object):
 
     def close(self):
         self.player.stop()
+        self._drop_rescue()
+        if self._fd is not None:
+            try:
+                os.close(self._fd)
+            except OSError:
+                pass
+            self._fd = None
 
     def busy(self):
         """Whether this tab wants the screen repainted a few times a second."""
         return self.player.playing
 
     # ---------------- doing things ----------------
+    def lost(self):
+        """Deleted, with no copy of our own: there is nothing left to play."""
+        return self.missing and not self.rescued
+
     def toggle(self):
+        if self.lost():
+            if self.player.playing:
+                return self.player.pause()     # let what is playing be stopped
+            self.app.status('%s has been deleted' % self.title)
+            return False
         if self.player.finished():
             return self.player.play(0.0)
         return self.player.toggle()
@@ -96,7 +234,7 @@ class AudioView(object):
         self.player.set_rate(SPEEDS[(i + step) % len(SPEEDS)])
 
     def seek_to_fraction(self, fraction):
-        if not self.player.duration:
+        if self.lost() or not self.player.duration:
             return False
         if not self.player.can_seek():
             self.app.status('%s cannot seek; install ffmpeg or mpv for that'
@@ -112,6 +250,8 @@ class AudioView(object):
             self.toggle()
         elif name == 'enter':
             self.toggle()
+        elif name in ('left', 'right', 'home') and self.lost():
+            self.app.status('%s has been deleted' % self.title)
         elif name == 'left':
             self.player.nudge(-STEP)
         elif name == 'right':
@@ -159,6 +299,7 @@ class AudioView(object):
         left = rect.x + (rect.w - width) // 2
         top = rect.y + max(0, (rect.h - 9) // 2)
 
+        self.check_disk()
         self._centre(screen, rect, top, self.title, theme.FG, BOLD)
         kind = os.path.splitext(self.path)[1].lstrip('.').lower() or 'audio'
         note = '%s · %s' % (kind, _clock(player.duration))
@@ -168,9 +309,10 @@ class AudioView(object):
 
         if player.backend is None:
             self._centre(screen, rect, top + 4,
-                         'no audio player on this machine', theme.WARN, BOLD)
+                         'nothing on this machine can play sound', theme.WARN,
+                         BOLD)
             self._centre(screen, rect, top + 5,
-                         'install ffmpeg, mpv or sox to play this',
+                         'install ffmpeg (or mpv, or sox) and open it again',
                          theme.FG_DIM, DIM)
             self.play_span = self.bar_span = self.speed_span = None
             return None
@@ -195,8 +337,18 @@ class AudioView(object):
 
         hint = 'space play/pause   ←/→ %ds   s speed' % int(STEP)
         self._centre(screen, rect, top + 8, hint, theme.FG_DIM, DIM)
-        if player.error:
-            self._centre(screen, rect, top + 9, player.error, theme.ERROR, 0)
+        if os.environ.get('SSH_CONNECTION') or os.environ.get('SSH_TTY'):
+            self._centre(screen, rect, top + 9,
+                         'over ssh: the sound comes out of the machine tide is '
+                         'running on', theme.FG_DIM, DIM)
+        if self.missing:
+            kept = 'this copy is gone when the tab closes' if self.rescued \
+                else 'it will play to the end, but cannot start again'
+            self._centre(screen, rect, top + 10,
+                         '!  the file has been deleted', theme.ERROR, BOLD)
+            self._centre(screen, rect, top + 11, kept, theme.FG_DIM, DIM)
+        elif player.error:
+            self._centre(screen, rect, top + 10, player.error, theme.ERROR, 0)
         return None
 
     def _bar(self, screen, left, y, width, player):

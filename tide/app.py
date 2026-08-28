@@ -319,8 +319,7 @@ class App(object):
         if ed is None:
             return False
         if getattr(ed, 'is_audio', False):
-            self.status('%s is a sound file, not text' % ed.title)
-            return False
+            return False               # a sound file has nothing to save
         if ed.is_diff:
             self.status('%s is a read-only diff' % ed.title)
             return False
@@ -408,6 +407,8 @@ class App(object):
         self._refresh_tree_if_due(now)
 
     def _check_one_file(self, index, ed):
+        if getattr(ed, 'is_audio', False):
+            return ed.check_disk()        # a sound tab watches its own file
         doc = ed.doc
         if not doc.path:
             return
@@ -1031,9 +1032,14 @@ class App(object):
         """(letter, colour) per editor tab, matching the explorer's marks."""
         git = getattr(self, 'git', None)
         if git is None or not git.enabled:
-            return [None] * len(self.editors)
+            return [getattr(ed, 'tab_mark', lambda: None)()
+                    for ed in self.editors]
         out = []
         for ed in self.editors:
+            own = getattr(ed, 'tab_mark', None)
+            if own is not None:            # a tab with something of its own
+                out.append(own())          # to say - a deleted sound file
+                continue
             path = getattr(ed, 'path', None)
             status = git.status_for(path, False) if path else None
             if path and git.is_ignored(path):

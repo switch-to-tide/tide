@@ -197,6 +197,20 @@ class TestModernBoxes(LookTest):
         self.assertTrue(box.contains(tabs.x, tabs.y), 'the tabs are outside')
         self.assertIn('app.py', self.screen(app))
 
+    def test_the_open_tab_stands_out(self):
+        for name in theme.names_for('modern'):
+            app = self.app('modern', name)
+            app.open_file(os.path.join(self.tmp, 'README.md'))
+            app.render()
+            row = app.screen.cells[app.rects['tabs'].y]
+            active = [x for x, cell in enumerate(row)
+                      if cell[2] == theme.TAB_ACTIVE_BG]
+            self.assertNotEqual(theme.TAB_ACTIVE_BG, theme.TAB_BG,
+                                '%s cannot show which tab is open' % name)
+            self.assertTrue(active, 'nothing is drawn as the open tab')
+            painted = ''.join(row[x][0] or ' ' for x in active)
+            self.assertIn('README', painted, 'the wrong tab looks open')
+
     def test_the_tabs_have_room_to_breathe(self):
         app = self.app('modern', 'forest')
         box, tabs, editor = (app.rects['editor_box'], app.rects['tabs'],

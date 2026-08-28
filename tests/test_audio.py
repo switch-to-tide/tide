@@ -310,8 +310,9 @@ class TestTheTab(AudioTest):
         before = open(self.tone, 'rb').read()
         for ch in 'XYZ':
             app.handle_key(Key('char', char=ch))
+        said = app.message
         self.assertFalse(app.save())
-        self.assertIn('not text', app.message)
+        self.assertEqual(app.message, said, 'ctrl+s said something')
         self.assertEqual(open(self.tone, 'rb').read(), before,
                          'the sound file was written to')
         view.close()
@@ -350,8 +351,17 @@ class TestTheTab(AudioTest):
         player_mod.forget()
         app, _view = self.open()
         painted = self.painted(app)
-        self.assertIn('no audio player', painted)
+        self.assertIn('can play sound', painted)
         self.assertIn('ffmpeg', painted)
+
+    def test_over_ssh_it_says_where_the_sound_goes(self):
+        os.environ['SSH_CONNECTION'] = '10.0.0.1 22 10.0.0.2 22'
+        try:
+            app, view = self.open()
+            self.assertIn('over ssh', self.painted(app))
+            view.close()
+        finally:
+            os.environ.pop('SSH_CONNECTION', None)
 
 
 class TestTheSetting(AudioTest):
@@ -424,6 +434,411 @@ class TestInASession(unittest.TestCase):
         s.pump(0.6)
         self.assertIn('Xhello', s.screen(), 'the editor stopped working')
         self.assertNotIn('Traceback', s.screen())
+
+
+def open_fds():
+    """How many files this process has open, for spotting leaks."""
+    for folder in ('/proc/self/fd', '/dev/fd'):
+        if os.path.isdir(folder):
+            try:
+                return len(os.listdir(folder))
+            except OSError:
+                pass
+    return 0
+
+
+class TestWhenTheFileGoesAway(AudioTest):
+    def open(self):
+        app = self.app()
+        view = app.open_file(self.tone)
+        app.render()
+        return app, view
+
+    def delete(self, view):
+        os.remove(self.tone)
+        view.check_disk(force=True)
+
+    def test_it_keeps_playing_what_it_had(self):
+        app, view = self.open()
+        view.player.play(0.0)
+        time.sleep(0.3)
+        self.delete(view)
+        self.assertTrue(view.missing)
+        self.assertTrue(view.player.playing, 'the sound stopped with the file')
+        app.render()
+        self.assertNotIn('Traceback', self.painted(app))
+        view.close()
+
+    def test_the_tab_carries_a_red_mark(self):
+        app, view = self.open()
+        self.delete(view)
+        mark = view.tab_mark()
+        self.assertEqual(mark[0], '!')
+        from tide import theme
+        self.assertEqual(mark[1], theme.ERROR)
+        app.render()
+        strip = ''.join(c[0] or ' ' for c in app.screen.cells[1])
+        self.assertIn('!', strip, 'no mark on the tab itself')
+        view.close()
+
+    def test_the_tab_says_what_happened(self):
+        app, view = self.open()
+        self.delete(view)
+        app.render()
+        self.assertIn('the file has been deleted', self.painted(app))
+        view.close()
+
+    def test_it_can_still_be_played_from_the_start(self):
+        app, view = self.open()
+        self.delete(view)
+        self.assertTrue(view.rescued, 'nothing was kept')
+        self.assertTrue(view.player.play(0.0), 'it will not play again')
+        self.assertTrue(view.player.playing)
+        view.close()
+
+    def test_it_can_still_be_paused_resumed_and_seeked(self):
+        app, view = self.open()
+        view.player.play(0.0)
+        time.sleep(0.2)
+        self.delete(view)
+        view.player.pause()
+        self.assertTrue(view.player.paused)
+        view.player.resume()
+        self.assertTrue(view.player.playing)
+        view.player.seek(3.0)
+        self.assertAlmostEqual(view.player.position(), 3.0, delta=0.3)
+        view.close()
+
+    def test_what_it_kept_goes_when_the_tab_does(self):
+        app, view = self.open()
+        self.delete(view)
+        kept = view.rescued
+        self.assertTrue(os.path.exists(kept))
+        app.close_tab(app.active)
+        self.assertFalse(os.path.exists(kept), 'the copy outlived the tab')
+
+    def test_saving_a_sound_file_does_nothing_whatsoever(self):
+        app, view = self.open()
+        self.delete(view)
+        before = app.message
+        self.assertFalse(app.save())
+        self.assertFalse(os.path.exists(self.tone), 'ctrl+s put the file back')
+        self.assertEqual(app.message, before, 'ctrl+s said something')
+        view.close()
+
+    def test_a_file_that_comes_back_clears_the_warning(self):
+        app, view = self.open()
+        self.delete(view)
+        self.assertTrue(view.missing)
+        write_tone(self.tone, seconds=3)
+        view.check_disk(force=True)
+        self.assertFalse(view.missing, 'the warning stayed')
+        self.assertIsNone(view.rescued, 'the copy was kept for nothing')
+        self.assertAlmostEqual(view.player.duration, 3, places=1,
+                               msg='it did not measure the new file')
+        self.assertIsNone(view.tab_mark())
+        view.close()
+
+    def test_a_file_rewritten_under_us_is_measured_again(self):
+        app, view = self.open()
+        write_tone(self.tone, seconds=2)
+        view.check_disk(force=True)
+        self.assertFalse(view.missing)
+        self.assertAlmostEqual(view.player.duration, 2, places=1)
+        view.close()
+
+    def test_too_big_to_keep_means_no_second_play(self):
+        from tide.audio import view as view_mod
+        was = view_mod.RESCUE_LIMIT
+        view_mod.RESCUE_LIMIT = 10          # anything real is bigger
+        try:
+            app, view = self.open()
+            self.delete(view)
+            self.assertTrue(view.missing)
+            self.assertIsNone(view.rescued)
+            app.render()
+            self.assertIn('cannot start again', self.painted(app))
+            self.assertTrue(view.lost())
+            self.assertFalse(view.toggle(), 'it played a missing file')
+            self.assertFalse(view.player.playing)
+            view.close()
+        finally:
+            view_mod.RESCUE_LIMIT = was
+
+    def test_the_directory_going_too_is_survivable(self):
+        app, view = self.open()
+        view.player.play(0.0)
+        shutil.rmtree(self.tmp)
+        view.check_disk(force=True)
+        app.render()
+        self.assertTrue(view.missing)
+        self.assertNotIn('Traceback', self.painted(app))
+        view.close()
+
+    def test_a_directory_in_its_place_does_not_break_anything(self):
+        app, view = self.open()
+        os.remove(self.tone)
+        os.makedirs(self.tone)
+        view.check_disk(force=True)
+        app.render()
+        self.assertNotIn('Traceback', self.painted(app))
+        view.close()
+
+
+class TestOddFiles(AudioTest):
+    def open_named(self, name, data=b''):
+        path = os.path.join(self.tmp, name)
+        with open(path, 'wb') as f:
+            f.write(data)
+        app = self.app()
+        view = app.open_file(path)
+        app.render()
+        return app, view
+
+    def test_an_empty_file(self):
+        app, view = self.open_named('empty.wav')
+        self.assertTrue(getattr(view, 'is_audio', False))
+        self.assertIsNone(view.player.duration)
+        self.assertNotIn('Traceback', self.painted(app))
+        view.close()
+
+    def test_a_file_that_is_not_really_audio(self):
+        app, view = self.open_named('fake.mp3', b'this is text pretending')
+        app.handle_key(Key('char', char=' '))
+        app.render()
+        self.assertNotIn('Traceback', self.painted(app))
+        view.close()
+
+    def test_a_name_with_spaces_and_accents(self):
+        name = 'a song — with spaces.wav'
+        path = os.path.join(self.tmp, name)
+        write_tone(path, seconds=2)
+        app = self.app()
+        view = app.open_file(path)
+        app.render()
+        self.assertIn('song', self.painted(app))
+        self.assertTrue(view.player.play(0.0))
+        view.close()
+
+    def test_a_file_we_are_not_allowed_to_read(self):
+        path = os.path.join(self.tmp, 'locked.wav')
+        write_tone(path, seconds=1)
+        os.chmod(path, 0o000)
+        try:
+            app = self.app()
+            view = app.open_file(path)
+            app.render()
+            self.assertNotIn('Traceback', self.painted(app))
+            view.close()
+        finally:
+            os.chmod(path, 0o644)
+
+    def test_a_symlink_whose_target_disappears(self):
+        link = os.path.join(self.tmp, 'link.wav')
+        os.symlink(self.tone, link)
+        app = self.app()
+        view = app.open_file(link)
+        view.player.play(0.0)
+        os.remove(self.tone)
+        view.check_disk(force=True)
+        app.render()
+        self.assertTrue(view.missing)
+        self.assertNotIn('Traceback', self.painted(app))
+        view.close()
+
+    def test_seeking_outside_the_file(self):
+        app = self.app()
+        view = app.open_file(self.tone)
+        view.player.seek(-50)
+        self.assertEqual(view.player.position(), 0.0)
+        view.player.seek(9999)
+        self.assertLessEqual(view.player.position(), TONE_SECONDS)
+        view.close()
+
+
+class TestBackends(unittest.TestCase):
+    def test_the_ones_that_can_seek_come_first(self):
+        from tide.audio.player import BACKENDS
+        names = [b.name for b in BACKENDS]
+        self.assertLess(names.index('ffplay'), names.index('afplay'))
+        self.assertLess(names.index('ffmpeg|aplay'), names.index('aplay'))
+        first_plain = min(i for i, b in enumerate(BACKENDS) if not b.seek)
+        last_seeking = max(i for i, b in enumerate(BACKENDS) if b.seek)
+        self.assertLess(last_seeking, first_plain,
+                        'a player that cannot seek is being preferred')
+
+    def test_a_backend_that_needs_two_programs_waits_for_both(self):
+        from tide.audio import player as mod
+        folder = tempfile.mkdtemp(prefix='tide-audio-needs-')
+        was = os.environ.get('PATH', '')
+        try:
+            os.environ['PATH'] = folder
+            for name in ('ffmpeg',):        # ffmpeg alone is not enough
+                path = os.path.join(folder, name)
+                with open(path, 'w') as f:
+                    f.write('#!/bin/sh\nexit 0\n')
+                os.chmod(path, 0o755)
+            mod.forget()
+            self.assertIsNone(mod.backend('x.mp3'))
+            path = os.path.join(folder, 'aplay')
+            with open(path, 'w') as f:
+                f.write('#!/bin/sh\nexit 0\n')
+            os.chmod(path, 0o755)
+            mod.forget()
+            self.assertEqual(mod.backend('x.mp3').name, 'ffmpeg|aplay')
+        finally:
+            os.environ['PATH'] = was
+            mod.forget()
+            shutil.rmtree(folder, ignore_errors=True)
+
+    def test_a_pipeline_is_paused_as_a_whole(self):
+        """A shell running two programs must stop, not just the shell."""
+        from tide.audio import player as mod
+        folder = tempfile.mkdtemp(prefix='tide-audio-pipe-')
+        was = os.environ.get('PATH', '')
+        try:
+            os.environ['PATH'] = folder
+            for name in ('ffmpeg', 'aplay'):
+                path = os.path.join(folder, name)
+                with open(path, 'w') as f:
+                    f.write('#!/bin/sh\nexec /bin/sleep 20\n')
+                os.chmod(path, 0o755)
+            mod.forget()
+            tone = write_tone(os.path.join(folder, 'x.wav'), seconds=2)
+            p = mod.Player(tone)
+            self.assertEqual(p.backend.name, 'ffmpeg|aplay')
+            p.play(0.0)
+            time.sleep(0.3)
+            group = os.getpgid(p._process.pid)
+            self.assertNotEqual(group, os.getpgid(0), 'not its own group')
+            p.pause()
+            p.resume()
+            self.assertTrue(p.playing)
+            child = p._process
+            p.stop()
+            time.sleep(0.2)
+            self.assertIsNotNone(child.poll(), 'the pipeline is still running')
+        finally:
+            os.environ['PATH'] = was
+            mod.forget()
+            shutil.rmtree(folder, ignore_errors=True)
+
+
+class TestStress(AudioTest):
+    def test_a_hundred_starts_and_stops_leak_nothing(self):
+        app = self.app()
+        view = app.open_file(self.tone)
+        before = open_fds()
+        for i in range(100):
+            view.player.play(float(i % 5))
+            view.player.pause()
+            view.player.resume()
+            view.player.seek(float(i % 4))
+        view.player.stop()
+        time.sleep(0.3)
+        self.assertLessEqual(open_fds(), before + 4, 'file handles are leaking')
+        leftovers = [f for f in os.listdir(tempfile.gettempdir())
+                     if f.startswith('tide-play-') or f.startswith('tide-kept-')]
+        view.close()
+        self.assertEqual(leftovers, [], 'temporary files are piling up')
+
+    def test_opening_and_closing_many_tabs(self):
+        app = self.app()
+        before = open_fds()
+        for _ in range(30):
+            app.open_file(self.tone)
+            app.editors[app.active].player.play(0.0)
+            app.close_tab(app.active)
+        time.sleep(0.3)
+        self.assertLessEqual(open_fds(), before + 4, 'file handles are leaking')
+
+    def test_two_tabs_play_without_treading_on_each_other(self):
+        other = os.path.join(self.tmp, 'other.wav')
+        write_tone(other, seconds=3)
+        app = self.app()
+        one = app.open_file(self.tone)
+        two = app.open_file(other)
+        one.player.play(0.0)
+        two.player.play(1.0)
+        self.assertTrue(one.player.playing and two.player.playing)
+        self.assertNotEqual(one.player._process.pid, two.player._process.pid)
+        first = one.player._process
+        app.close_tab(0)
+        time.sleep(0.2)
+        self.assertIsNotNone(first.poll(), 'closing one did not stop it')
+        self.assertTrue(two.player.playing, 'closing one stopped the other')
+        two.close()
+
+    def test_the_player_being_killed_from_outside(self):
+        app = self.app()
+        view = app.open_file(self.tone)
+        view.player.play(0.0)
+        os.kill(view.player._process.pid, 9)
+        time.sleep(0.3)
+        app.render()
+        self.assertTrue(view.player.finished())
+        self.assertFalse(view.player.playing)
+        self.assertNotIn('Traceback', self.painted(app))
+        self.assertTrue(view.player.play(0.0), 'it could not be started again')
+        view.close()
+
+    def test_the_player_program_disappearing(self):
+        app = self.app()
+        view = app.open_file(self.tone)
+        os.remove(os.path.join(self.bin, 'ffplay'))
+        started = view.player.play(0.0)
+        app.render()
+        self.assertFalse(started)
+        self.assertIsNotNone(view.player.error)
+        self.assertNotIn('Traceback', self.painted(app))
+        view.close()
+
+    def test_hammering_the_buttons(self):
+        app = self.app()
+        view = app.open_file(self.tone)
+        app.render()
+        px, _p2, py = view.play_span
+        bx1, bx2, by = view.bar_span
+        sx, _s2, sy = view.speed_span
+        for i in range(60):
+            app.handle_mouse(Mouse('press', px + 2, py))
+            app.handle_mouse(Mouse('press', bx1 + (i % (bx2 - bx1)), by))
+            app.handle_mouse(Mouse('press', sx + 2, sy))
+            app.render()
+        self.assertNotIn('Traceback', self.painted(app))
+        self.assertIn(view.player.rate, SPEEDS_SEEN)
+        view.close()
+
+    def test_quitting_while_it_plays(self):
+        app = self.app()
+        view = app.open_file(self.tone)
+        view.player.play(0.0)
+        process = view.player._process
+        for tab in app.editors:
+            if hasattr(tab, 'close'):
+                tab.close()
+        time.sleep(0.2)
+        self.assertIsNotNone(process.poll(), 'the sound outlived the editor')
+
+    def test_deleting_the_file_a_hundred_times_over(self):
+        app = self.app()
+        view = app.open_file(self.tone)
+        for _ in range(25):
+            os.remove(self.tone)
+            view.check_disk(force=True)
+            self.assertTrue(view.missing)
+            write_tone(self.tone, seconds=1)
+            view.check_disk(force=True)
+            self.assertFalse(view.missing)
+        app.render()
+        self.assertNotIn('Traceback', self.painted(app))
+        leftovers = [f for f in os.listdir(tempfile.gettempdir())
+                     if f.startswith('tide-kept-')]
+        view.close()
+        self.assertEqual(leftovers, [], 'kept copies are piling up')
+
+
+SPEEDS_SEEN = [0.5, 1.0, 1.25, 1.5, 2.0]
 
 
 if __name__ == '__main__':

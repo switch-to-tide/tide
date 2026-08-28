@@ -12,6 +12,7 @@ that can only play.
 """
 
 import os
+import shlex
 import signal
 import subprocess
 import time
@@ -25,12 +26,14 @@ WAVE_ONLY = {'.wav', '.aiff', '.aif', '.au', '.snd', '.flac', '.ogg'}
 class Backend(object):
     """One player, and what it can be asked to do."""
 
-    def __init__(self, name, build, seek=False, rate=False, formats=ANY):
+    def __init__(self, name, build, seek=False, rate=False, formats=ANY,
+                 needs=None):
         self.name = name
         self.build = build
         self.seek = seek
         self.rate = rate
         self.formats = formats
+        self.needs = needs or [name.split()[0]]
 
     def plays(self, path):
         if self.formats is ANY:
@@ -81,6 +84,21 @@ def _vlc(path, start, rate):
     return args + [path]
 
 
+def _pipe(sink):
+    """ffmpeg decodes anything; the sink just has to play a wav on stdin."""
+    def build(path, start, rate):
+        parts = ['ffmpeg', '-v', 'quiet']
+        if start:
+            parts += ['-ss', '%.3f' % start]
+        parts += ['-i', path]
+        if rate != 1.0:
+            parts += ['-af', 'atempo=%.3f' % rate]
+        parts += ['-f', 'wav', '-']
+        line = ' '.join(shlex.quote(p) for p in parts)
+        return ['/bin/sh', '-c', '%s | %s' % (line, sink)]
+    return build
+
+
 def _plain(command):
     def build(path, _start, _rate):
         return [command, path]
@@ -88,15 +106,28 @@ def _plain(command):
 
 
 BACKENDS = [
+    # first the players that can do everything themselves
     Backend('ffplay', _ffplay, seek=True, rate=True),
     Backend('mpv', _mpv, seek=True, rate=True),
-    Backend('afplay', _afplay, rate=True),         # macOS, always there
-    Backend('play', _sox, seek=True, rate=True),   # sox
+    Backend('play', _sox, seek=True, rate=True),          # sox
+    # then ffmpeg, which is on far more machines than ffplay is, decoding into
+    # anything that can play a wav on its standard input
+    Backend('ffmpeg|aplay', _pipe('aplay -q -'), seek=True, rate=True,
+            needs=['ffmpeg', 'aplay']),
+    Backend('ffmpeg|pw-cat', _pipe('pw-cat --playback -'), seek=True, rate=True,
+            needs=['ffmpeg', 'pw-cat']),
+    Backend('ffmpeg|afplay', _pipe('afplay /dev/stdin'), seek=True, rate=True,
+            needs=['ffmpeg', 'afplay']),
     Backend('cvlc', _vlc, seek=True, rate=True),
+    # and last the ones that only play: afplay is on every Mac, and the rest
+    # are whatever the sound server on this Linux happens to be
+    Backend('afplay', _afplay, rate=True),
     Backend('paplay', _plain('paplay'), formats=WAVE_ONLY),
     Backend('pw-play', _plain('pw-play'), formats=WAVE_ONLY),
     Backend('aplay', _plain('aplay'), formats={'.wav'}),
 ]
+
+INSTALL_HINT = 'install ffmpeg, mpv or sox to play this'
 
 _found = {}
 
@@ -118,7 +149,8 @@ def _which(command):
 def backend(path=None):
     """The best player on this machine for this file, or None."""
     for entry in BACKENDS:
-        if _have(entry.name) and (path is None or entry.plays(path)):
+        if all(_have(need) for need in entry.needs) and \
+                (path is None or entry.plays(path)):
             return entry
     return None
 
@@ -203,7 +235,7 @@ class Player(object):
         try:
             self._process = subprocess.Popen(
                 args, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL)
+                stderr=subprocess.DEVNULL, start_new_session=True)
         except OSError as exc:
             self.error = 'could not start %s (%s)' % (self.backend.name, exc)
             self._process = None
@@ -213,6 +245,10 @@ class Player(object):
         self._base = start
         self._since = time.time()
         return True
+
+    def use_source(self, path):
+        """Play from somewhere else from now on - a copy of a deleted file."""
+        self.path = path
 
     def _source_for(self, start):
         """What to hand the player, and the offset it should be told about."""
@@ -230,10 +266,7 @@ class Player(object):
             return False
         self._base = self.position()
         self._since = None
-        try:
-            self._process.send_signal(signal.SIGSTOP)
-        except Exception:
-            pass
+        self._signal(signal.SIGSTOP)
         return True
 
     def resume(self):
@@ -241,9 +274,7 @@ class Player(object):
             return False
         if self.finished():
             return self.play(0.0)
-        try:
-            self._process.send_signal(signal.SIGCONT)
-        except Exception:
+        if not self._signal(signal.SIGCONT):
             return self.play(self._base)
         self._since = time.time()
         return True
@@ -294,10 +325,10 @@ class Player(object):
         process = self._process
         self._process = None
         if process is not None and process.poll() is None:
-            try:
-                process.send_signal(signal.SIGCONT)   # a stopped child ignores
-            except Exception:                         # anything but SIGKILL
-                pass
+            self._process = process           # _signal works on this one
+            self._signal(signal.SIGCONT)      # a stopped child ignores
+            self._signal(signal.SIGKILL)      # anything but SIGKILL
+            self._process = None
             try:
                 process.kill()
             except Exception:
@@ -307,6 +338,22 @@ class Player(object):
             except Exception:
                 pass
         self._drop_temp()
+
+    def _signal(self, sig):
+        """Signal the player and anything it started, as one group."""
+        process = self._process
+        if process is None or process.poll() is not None:
+            return False
+        try:
+            os.killpg(os.getpgid(process.pid), sig)
+            return True
+        except Exception:
+            pass
+        try:
+            process.send_signal(sig)
+            return True
+        except Exception:
+            return False
 
     def _reap(self):
         process = self._process
