@@ -520,11 +520,15 @@ def describe(settings, out):
     out.write('    Host %s\n        RemoteForward %d 127.0.0.1:%d\n\n'
               % (host, port, port))
     if found:
-        out.write('A sink is answering on port %d right now (%s).\n'
+        out.write('The pipe is up: a sink is answering on port %d (%s).\n'
                   % (port, said))
         return 0
-    out.write('Nothing is answering on port %d at the moment: %s\n'
+    out.write('The pipe is down: nothing is answering on port %d (%s).\n\n'
               % (port, said))
+    out.write('Check that the sink is still running where you are sitting,\n'
+              'and that the ssh connection carrying the port is this one.\n'
+              'To set it up again from scratch, turn audio off and on in the\n'
+              'settings (f9) - the panel asks from the beginning each time.\n')
     return 1
 
 

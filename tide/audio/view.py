@@ -372,6 +372,14 @@ class AudioView(object):
         elif player.error:
             from .player import no_sound_card
             self._centre(screen, rect, top + 10, player.error, theme.ERROR, 0)
+            if getattr(player, 'port', None):     # a pipe that is not answering
+                self._centre(screen, rect, top + 11,
+                             'the sink is not answering: check it is still '
+                             'running where you are sitting', theme.FG_DIM, DIM)
+                self._centre(screen, rect, top + 12,
+                             'tide --show-audio-pipe prints the commands; '
+                             'audio off and on again sets it up afresh',
+                             theme.FG_DIM, DIM)
             if no_sound_card(player.error):
                 self._centre(screen, rect, top + 11,
                              'this machine has no sound output - a server '

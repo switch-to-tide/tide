@@ -6,7 +6,15 @@ Versions are tagged in git as `v0.1.0` and so on, and the installer takes one:
 curl -fsSL https://raw.githubusercontent.com/switch-to-tide/tide/main/install.sh | sh -s -- 0.1.0
 ```
 
-## 0.1.11 — unreleased
+## 0.1.12 — unreleased
+
+- `tide --show-audio-pipe` says whether the pipe is up or down, and when it is
+  down says what to check and how to set it up again. A tab that cannot reach
+  the sink says the same thing rather than only the error.
+- Turning audio off and on again asks from the beginning, so setting the pipe
+  up again is two keystrokes in the settings.
+
+## 0.1.11 — 2026-08-28
 
 - `tide --show-audio-pipe` prints how to connect the audio pipe to this
   machine - the sink command, both ssh forms and the ssh config block - and
