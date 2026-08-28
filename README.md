@@ -27,10 +27,28 @@ tide file.py        # open a file
 tide src/ a.py      # a project root plus some files
 ```
 
-To update, run the same curl command again. To remove it:
+**A particular version** (releases are tagged `v0.1.0`, `v0.1.1`, …):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/switch-to-tide/tide/main/install.sh | sh -s -- 0.1.0
+```
+
+`TIDE_VERSION=0.1.0` does the same thing, and a branch or a commit works
+where a version does. Running the installer again moves the checkout to
+whatever you ask for that time, so it downgrades as easily as it updates.
+`git ls-remote --tags https://github.com/switch-to-tide/tide.git` lists what
+there is; `tide --version` says what you have.
+
+To update to the newest code, run the same curl command again. To remove it:
 
 ```sh
 rm -rf ~/.local/share/tide ~/.local/bin/tide
+```
+
+With pip, a version pins the same way:
+
+```sh
+pip install "git+https://github.com/switch-to-tide/tide.git@v0.1.0"
 ```
 
 ## Run it from a clone

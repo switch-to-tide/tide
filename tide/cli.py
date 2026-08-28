@@ -14,7 +14,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(
         prog='tide', description='A small terminal IDE: editor, explorer and shells.')
     ap.add_argument('--version', action='version',
-                    version='terminal_ide %s' % __version__)
+                    version='%(prog)s ' + __version__)
     ap.add_argument('paths', nargs='*', help='files or a directory to open')
     ap.add_argument('--no-terminal', action='store_true', help='start with the terminal hidden')
     ap.add_argument('--no-tree', action='store_true', help='start with the explorer hidden')
