@@ -90,7 +90,7 @@ class AudioView(object):
         self.top = 0
         self.rect = Rect(0, 0, 1, 1)
         self.text_rect = self.rect
-        self.player = Player(self.path)
+        self.player = self._make_player()
         self.play_span = None
         self.bar_span = None
         self.speed_span = None
@@ -105,6 +105,18 @@ class AudioView(object):
             self._fd = os.open(self.path, os.O_RDONLY)
         except OSError:
             self._fd = None
+
+    def _make_player(self):
+        """A player here, or a link to the sink where you are sitting."""
+        port = 0
+        try:
+            port = int(self.app.settings.get('audio_sink_port') or 0)
+        except (TypeError, ValueError):
+            port = 0
+        if port:
+            from .remote import Link
+            return Link(self.path, port, duration=probe.duration(self.path))
+        return Player(self.path)
 
     # ---------------- the file underneath ----------------
     def _disk_stamp(self):

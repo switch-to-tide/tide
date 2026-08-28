@@ -516,16 +516,26 @@ class App(object):
         self.need_render = True
 
     def audio_allowed(self):
-        """Whether sound can be turned on, asking first if it is a compromise.
+        """Turning sound on: ask where it should come out, then check.
 
-        Full control needs ffmpeg or mpv. With only a plain player here the
-        question is put to you, and the setting stays off unless you say to
-        use it; with nothing at all it stays off and says what to install.
+        The panel answers itself away and puts the settings back. Everything
+        it does goes through force_setting, so the preference only ever moves
+        because an answer moved it.
         """
+        from .audio.setup import AudioSetup
+        panel = self.overlay if isinstance(self.overlay, SettingsPanel) else None
+        self.overlay = AudioSetup(self, panel)
+        self.need_render = True
+        return False
+
+    def enable_audio_locally(self):
+        """The checks as they have always been, for sound on this machine."""
         from . import audio
+        self.settings['audio_sink_port'] = 0
         full, plain = audio.survey()
         if full:
-            self.status('audio playback on, using %s' % full)
+            self.force_setting('audio', True,
+                               'audio playback on, using %s' % full)
             return True
         both = '%s or %s' % (audio.PREFERRED, audio.PREFERRED_ALSO)
         panel = self.overlay if isinstance(self.overlay, SettingsPanel) else None

@@ -6,7 +6,20 @@ Versions are tagged in git as `v0.1.0` and so on, and the installer takes one:
 curl -fsSL https://raw.githubusercontent.com/switch-to-tide/tide/main/install.sh | sh -s -- 0.1.0
 ```
 
-## 0.1.7 — unreleased
+## 0.1.8 — unreleased
+
+- **Sound from an ssh session, out of the machine you are sitting at.**
+  Turning audio on now asks where the sound should come out. *This machine*
+  behaves exactly as before, unchanged. *The machine I am sitting at* shows
+  what to run there - `tide --audio-sink` - and the ssh line that carries a
+  port back, and takes the port you paste in. It is remembered, so every
+  session afterwards just plays, for as long as the sink is running.
+  The file crosses once, when you first press play; seeking, pausing and
+  speed are short messages after that, and the progress bar is worked out
+  locally so a slow link never holds up the screen. The sink plays through
+  whatever that machine has, so it works from a mac or from linux.
+
+## 0.1.7 — 2026-08-28
 
 - **Fixed updates being stuck.** A version tag that had been repointed on the
   remote made `git fetch --tags` refuse the whole fetch - "would clobber

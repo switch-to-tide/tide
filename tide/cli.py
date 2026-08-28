@@ -174,6 +174,8 @@ def main(argv=None):
                     help='ask before opening a file with more lines')
     ap.add_argument('--max-mb', type=float, default=None, metavar='MB',
                     help='ask before opening a file bigger than this')
+    ap.add_argument('--audio-sink', nargs='?', const='', metavar='PORT',
+                    help='play what a tide over ssh sends here (see --help)')
     ap.add_argument('--audio-check', nargs='?', const='', metavar='FILE',
                     help='say what will happen when a sound file is played')
     ap.add_argument('--update', nargs='?', const='', metavar='VERSION',
@@ -189,6 +191,21 @@ def main(argv=None):
 
     if args.update is not None:
         return update(args.update)
+    if args.audio_sink is not None:
+        from .audio.remote import PORT, serve
+        try:
+            port = int(args.audio_sink or PORT)
+        except ValueError:
+            sys.stderr.write('--audio-sink takes a port number.\n')
+            return 2
+        try:
+            serve(port, out=sys.stdout)
+        except KeyboardInterrupt:
+            sys.stdout.write('\nstopped\n')
+        except OSError as exc:
+            sys.stderr.write('could not listen on %d: %s\n' % (port, exc))
+            return 1
+        return 0
     if args.audio_check is not None:
         from .audio.check import run as audio_check
         return audio_check(args.audio_check or None)

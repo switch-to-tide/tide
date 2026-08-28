@@ -162,7 +162,14 @@ Requires Python 3.7+ and a terminal that speaks xterm mouse reporting
 - `tide --audio-check song.mp3` says what will happen before you wonder why
   nothing did: what is installed, what was chosen, the exact command, whether
   it stayed alive, and what it said if it did not.
-- Over ssh the sound comes out of the machine tide is running on — the tab
+- **Over ssh, to hear it where you are sitting**: run `tide --audio-sink` on
+  your own machine, connect with `ssh -R 47000:127.0.0.1:47000 you@server`
+  (or a `RemoteForward` line in `~/.ssh/config`), and tell tide the port when
+  it asks - turning audio on offers the choice between this machine and the
+  one you are sitting at. It is asked once and remembered. The file goes over
+  when you first press play; after that seeking and pausing are short
+  messages, so they cost nothing.
+- Otherwise over ssh the sound comes out of the machine tide is running on — the tab
   says so. A terminal cannot do what VS Code does here, which is ship the
   bytes to the local Electron window and decode them there.
 - It costs nothing when you are not using it: the module is imported the first
