@@ -76,7 +76,7 @@ class AudioTest(unittest.TestCase):
         app = App(root=self.tmp, paths=[], out=io.StringIO())
         app.screen = Screen(cols, rows)
         app.show_term = False
-        app.settings['audio'] = sound
+        app.settings['audio'] = sound      # as if it had been turned on
         return app
 
     def painted(self, app):
@@ -365,9 +365,10 @@ class TestTheTab(AudioTest):
 
 
 class TestTheSetting(AudioTest):
-    def test_it_is_on_by_default_and_in_the_panel(self):
+    def test_it_is_off_until_asked_for_and_is_in_the_panel(self):
         from tide import settings as store
-        self.assertTrue(store.DEFAULTS['audio'])
+        self.assertFalse(store.DEFAULTS['audio'],
+                         'a fresh install should not assume a player')
         self.assertIn('audio', [key for key, _l, _v in store.FIELDS])
 
     def test_turned_off_a_sound_file_is_just_a_file_again(self):
@@ -397,13 +398,17 @@ class TestInASession(unittest.TestCase):
                 if os.path.exists(source) and not os.path.exists(link):
                     os.symlink(source, link)
         self.tone = write_tone(os.path.join(self.tmp, 'tone.wav'))
+        self.cfg = tempfile.mkdtemp(prefix='tide-audio-live-cfg-')
+        os.makedirs(os.path.join(self.cfg, 'tide'))
+        with open(os.path.join(self.cfg, 'tide', 'settings.json'), 'w') as f:
+            f.write('{"audio": true}')          # switched on, as a user would
         self.s = Session([self.tone, self.tmp], cols=90, rows=22, cwd=self.tmp,
-                         env={'PATH': self.bin})
+                         env={'PATH': self.bin, 'TIDE_CONFIG_HOME': self.cfg})
 
     def tearDown(self):
         self.s.close()
-        shutil.rmtree(self.tmp, ignore_errors=True)
-        shutil.rmtree(self.bin, ignore_errors=True)
+        for folder in (self.tmp, self.bin, self.cfg):
+            shutil.rmtree(folder, ignore_errors=True)
 
     def test_it_opens_playing_nothing_and_then_plays(self):
         painted = self.s.screen()
@@ -839,6 +844,228 @@ class TestStress(AudioTest):
 
 
 SPEEDS_SEEN = [0.5, 1.0, 1.25, 1.5, 2.0]
+
+
+class TestTurningItOn(unittest.TestCase):
+    """The setting only ever moves because you moved it."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix='tide-gate-')
+        self.cfg = tempfile.mkdtemp(prefix='tide-gate-cfg-')
+        self.bin = tempfile.mkdtemp(prefix='tide-gate-bin-')
+        os.environ['TIDE_CONFIG_HOME'] = self.cfg
+        self.was_path = os.environ.get('PATH', '')
+        os.environ['PATH'] = self.bin
+        player_mod.forget()
+
+    def tearDown(self):
+        os.environ['PATH'] = self.was_path
+        os.environ.pop('TIDE_CONFIG_HOME', None)
+        player_mod.forget()
+        for folder in (self.tmp, self.cfg, self.bin):
+            shutil.rmtree(folder, ignore_errors=True)
+
+    def provide(self, *names):
+        for name in names:
+            path = os.path.join(self.bin, name)
+            with open(path, 'w') as f:
+                f.write('#!/bin/sh\nexec /bin/sleep 30\n')
+            os.chmod(path, 0o755)
+        player_mod.forget()
+
+    def app(self):
+        app = App(root=self.tmp, paths=[], out=io.StringIO())
+        app.screen = Screen(90, 20)
+        app.show_term = False
+        return app
+
+    def stored(self):
+        from tide import settings as store
+        return store.load()['audio']
+
+    # -- nothing installed
+    def test_with_nothing_installed_it_refuses_and_says_what_to_get(self):
+        app = self.app()
+        app.set_setting('audio', True)
+        self.assertFalse(app.settings['audio'])
+        self.assertFalse(self.stored())
+        self.assertIsNone(app.overlay, 'it asked a question it cannot honour')
+        self.assertIn('ffmpeg', app.message)
+
+    # -- the good case
+    def test_with_ffplay_it_just_turns_on(self):
+        self.provide('ffplay')
+        app = self.app()
+        app.set_setting('audio', True)
+        self.assertTrue(app.settings['audio'])
+        self.assertTrue(self.stored())
+        self.assertIsNone(app.overlay, 'it asked when it did not need to')
+        self.assertIn('ffplay', app.message)
+
+    def test_mpv_counts_as_the_good_case_too(self):
+        self.provide('mpv')
+        app = self.app()
+        app.set_setting('audio', True)
+        self.assertTrue(app.settings['audio'])
+        self.assertIsNone(app.overlay)
+
+    def test_ffmpeg_with_a_sink_counts_as_the_good_case(self):
+        self.provide('ffmpeg', 'aplay')
+        app = self.app()
+        app.set_setting('audio', True)
+        self.assertTrue(app.settings['audio'])
+        self.assertIsNone(app.overlay)
+
+    # -- only something plain
+    def test_with_only_a_plain_player_it_asks_first(self):
+        self.provide('afplay')
+        app = self.app()
+        app.set_setting('audio', True)
+        self.assertIsNotNone(app.overlay, 'it did not ask')
+        self.assertFalse(app.settings['audio'], 'it turned on before being told')
+        self.assertFalse(self.stored())
+        self.assertIn('afplay', app.overlay.question)
+        self.assertIn('ffmpeg', app.overlay.question)
+
+    def test_saying_you_will_install_it_leaves_it_off(self):
+        self.provide('afplay')
+        app = self.app()
+        app.set_setting('audio', True)
+        app.overlay.on_no()
+        self.assertFalse(app.settings['audio'])
+        self.assertFalse(self.stored())
+        self.assertIn('install', app.message)
+
+    def test_saying_use_it_anyway_turns_it_on(self):
+        self.provide('afplay')
+        app = self.app()
+        app.set_setting('audio', True)
+        app.overlay.on_yes()
+        self.assertTrue(app.settings['audio'])
+        self.assertTrue(self.stored())
+        self.assertIn('afplay', app.message)
+
+    def test_escaping_the_question_leaves_it_off(self):
+        self.provide('afplay')
+        app = self.app()
+        app.set_setting('audio', True)
+        app.overlay.on_key(Key('escape'))
+        self.assertFalse(app.settings['audio'])
+        self.assertFalse(self.stored())
+
+    def test_the_question_comes_back_to_the_settings_panel(self):
+        from tide.overlay import SettingsPanel
+        self.provide('afplay')
+        app = self.app()
+        app.open_settings()
+        app.set_setting('audio', True)
+        self.assertNotIsInstance(app.overlay, SettingsPanel)
+        app.overlay.on_key(Key('char', char='y'))
+        self.assertIsInstance(app.overlay, SettingsPanel,
+                              'it did not put the settings back')
+        self.assertTrue(app.settings['audio'])
+
+    # -- turning it off, and staying put
+    def test_turning_it_off_never_asks(self):
+        self.provide('afplay')
+        app = self.app()
+        app.set_setting('audio', True)
+        app.overlay.on_yes()
+        app.overlay = None
+        app.set_setting('audio', False)
+        self.assertIsNone(app.overlay)
+        self.assertFalse(app.settings['audio'])
+        self.assertFalse(self.stored())
+
+    def test_a_hand_written_setting_is_believed(self):
+        from tide import settings as store
+        folder = os.path.join(self.cfg, 'tide')
+        os.makedirs(folder)
+        with open(os.path.join(folder, 'settings.json'), 'w') as f:
+            f.write('{"audio": true}')
+        self.assertTrue(store.load()['audio'])
+        app = self.app()
+        self.assertTrue(app.settings['audio'], 'it overrode what was asked for')
+
+    def test_it_does_not_move_when_other_settings_do(self):
+        self.provide('ffplay')
+        app = self.app()
+        for key, value in (('theme', 'light'), ('tab_width', 8),
+                           ('autosave', False), ('show_tree', False)):
+            app.set_setting(key, value)
+        self.assertFalse(app.settings['audio'])
+        self.assertFalse(self.stored())
+
+    def test_opening_a_sound_file_does_not_turn_it_on(self):
+        self.provide('ffplay')
+        app = self.app()
+        tone = write_tone(os.path.join(self.tmp, 'tone.wav'), seconds=1)
+        app.open_file(tone)
+        self.assertFalse(app.settings['audio'])
+        self.assertFalse(any(getattr(t, 'is_audio', False) for t in app.editors))
+
+    def test_fifty_goes_and_it_is_still_exactly_what_was_chosen(self):
+        self.provide('afplay')                  # the case that asks
+        app = self.app()
+        want = False
+        for i in range(50):
+            if i % 3 == 0:
+                app.set_setting('audio', False)
+                want = False
+            else:
+                app.set_setting('audio', True)
+                if app.overlay is not None:
+                    if i % 2:
+                        app.overlay.on_yes()
+                        want = True
+                    else:
+                        app.overlay.on_no()
+                        want = False
+                    app.overlay = None
+            self.assertEqual(app.settings['audio'], want, 'drifted at step %d' % i)
+            self.assertEqual(self.stored(), want, 'the file drifted at step %d' % i)
+
+    def test_the_same_in_every_kind_of_machine(self):
+        for tools, asks, ends_on in ((('ffplay',), False, True),
+                                     (('mpv',), False, True),
+                                     (('afplay',), True, True),
+                                     ((), False, False)):
+            shutil.rmtree(self.bin, ignore_errors=True)
+            os.makedirs(self.bin)
+            self.provide(*tools)
+            app = self.app()
+            app.settings['audio'] = False
+            app.set_setting('audio', True)
+            self.assertEqual(app.overlay is not None, asks,
+                             'wrong question for %s' % (tools,))
+            if app.overlay is not None:
+                app.overlay.on_yes()
+                app.overlay = None
+            self.assertEqual(app.settings['audio'], ends_on,
+                             'wrong end state for %s' % (tools,))
+
+
+class TestSurvey(unittest.TestCase):
+    def test_it_sorts_players_into_full_and_plain(self):
+        folder = tempfile.mkdtemp(prefix='tide-survey-')
+        was = os.environ.get('PATH', '')
+        try:
+            os.environ['PATH'] = folder
+            player_mod.forget()
+            self.assertEqual(audio.survey(), (None, None))
+            for name, expected in (('aplay', (None, 'aplay')),
+                                   ('ffplay', ('ffplay', 'aplay'))):
+                path = os.path.join(folder, name)
+                with open(path, 'w') as f:
+                    f.write('#!/bin/sh\nexit 0\n')
+                os.chmod(path, 0o755)
+                player_mod.forget()
+                self.assertEqual(audio.survey(), expected)
+            self.assertTrue(audio.available())
+        finally:
+            os.environ['PATH'] = was
+            player_mod.forget()
+            shutil.rmtree(folder, ignore_errors=True)
 
 
 if __name__ == '__main__':

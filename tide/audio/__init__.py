@@ -27,7 +27,30 @@ def open_view(app, path):
     return AudioView(app, path)
 
 
+# what to tell people to install: one package that can do everything
+PREFERRED = 'ffmpeg'
+PREFERRED_ALSO = 'mpv'
+
+
+def survey():
+    """What this machine can do: (full, plain).
+
+    `full` is a player that can seek and change speed - the whole feature.
+    `plain` is one that can only play from the start. Either may be None.
+    Nothing here is imported until something asks.
+    """
+    from .player import BACKENDS, _have
+    full = plain = None
+    for entry in BACKENDS:
+        if not all(_have(need) for need in entry.needs):
+            continue
+        if entry.seek and entry.rate:
+            full = full or entry.name
+        else:
+            plain = plain or entry.name
+    return full, plain
+
+
 def available():
     """Whether anything on this machine can play audio at all."""
-    from .player import backend
-    return backend() is not None
+    return any(survey())

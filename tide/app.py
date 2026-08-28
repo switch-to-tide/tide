@@ -178,7 +178,7 @@ class App(object):
             # pipes, sockets and device nodes: reading one would hang us
             self.status('%s is not a regular file' % os.path.basename(path))
             return None
-        if self.settings.get('audio', True):
+        if self.settings.get('audio'):
             from . import audio                 # a set literal, nothing more
             if audio.is_audio(path):
                 return self.open_audio(path)
@@ -504,9 +504,58 @@ class App(object):
         """Change one preference, apply it now and remember it for next time."""
         if self.settings.get(key) == value:
             return
+        if key == 'audio' and value and not self.audio_allowed():
+            return                     # it stays off until there is a player
         self.settings[key] = value
         settings_store.save(self.settings)
         self.apply_setting(key, value)
+        self.need_render = True
+
+    def audio_allowed(self):
+        """Whether sound can be turned on, asking first if it is a compromise.
+
+        Full control needs ffmpeg or mpv. With only a plain player here the
+        question is put to you, and the setting stays off unless you say to
+        use it; with nothing at all it stays off and says what to install.
+        """
+        from . import audio
+        full, plain = audio.survey()
+        if full:
+            self.status('audio playback on, using %s' % full)
+            return True
+        both = '%s or %s' % (audio.PREFERRED, audio.PREFERRED_ALSO)
+        panel = self.overlay if isinstance(self.overlay, SettingsPanel) else None
+        if plain:
+            self.overlay = Confirm(
+                '%s is not installed, so audio cannot seek or change speed. '
+                'Use %s anyway?' % (both, plain),
+                lambda: (self.force_setting('audio', True,
+                                            'audio playback on, using %s - '
+                                            'install %s for seeking'
+                                            % (plain, both)),
+                         self.back_to(panel)),
+                on_no=lambda: (self.status('audio stays off; install %s and '
+                                           'turn it on again' % both),
+                               self.back_to(panel)),
+                on_cancel=lambda: self.back_to(panel))
+            self.need_render = True
+            return False
+        self.status('audio needs %s installed - it stays off' % both)
+        return False
+
+    def back_to(self, overlay):
+        """Put a panel back after a question interrupted it."""
+        if overlay is not None:
+            self.overlay = overlay
+            self.need_render = True
+
+    def force_setting(self, key, value, message=None):
+        """Set a preference without asking again - the answer to the asking."""
+        self.settings[key] = value
+        settings_store.save(self.settings)
+        self.apply_setting(key, value)
+        if message:
+            self.status(message)
         self.need_render = True
 
     def apply_setting(self, key, value):

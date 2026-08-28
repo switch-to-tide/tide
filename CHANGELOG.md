@@ -21,6 +21,11 @@ curl -fsSL https://raw.githubusercontent.com/switch-to-tide/tide/main/install.sh
   the process group, so a pipeline stops and starts as one.
 - The tab says when you are over ssh, because then the sound comes out of the
   machine tide is running on.
+- **Audio playback now starts off**, since it needs a player no operating
+  system ships. Turning it on checks the machine once: with ffmpeg or mpv it
+  turns on; with only a plain player it asks whether to use that (no seeking,
+  no speed) or wait until you have installed one; with nothing it says what to
+  install and stays off. It never moves on its own.
 - In the modern appearance the open tab has a background of its own again, so
   you can see which file or shell you are looking at.
 

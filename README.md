@@ -127,6 +127,13 @@ Requires Python 3.7+ and a terminal that speaks xterm mouse reporting
 - Indent style (tabs vs spaces, width) is detected per file.
 
 **Audio**
+- **Off until you turn it on**, because it needs a player that is not part of
+  any operating system. Switch **Audio playback** on in the settings and one
+  of three things happens: with `ffmpeg` or `mpv` installed it simply turns
+  on; with only a plain player here (`afplay`, `aplay`, `paplay`) it asks
+  whether to use that instead, which plays but cannot seek or change speed —
+  say no and it stays off until you have installed one; with nothing at all it
+  says what to install and stays off. It never turns itself on or off.
 - A `.wav`, `.mp3`, `.m4a`, `.flac`, `.ogg` or `.aiff` file opens in a tab of
   its own — no question first, no binary dump — with a play button, a bar you
   can click or drag to go anywhere in the file, and a speed button cycling
@@ -152,9 +159,8 @@ Requires Python 3.7+ and a terminal that speaks xterm mouse reporting
   bytes to the local Electron window and decode them there.
 - It costs nothing when you are not using it: the module is imported the first
   time an audio file is opened, the screen only repaints while something is
-  actually playing, and the **Audio playback** setting turns the whole thing
-  off — with it off, a sound file is just another binary and no line of this
-  code runs.
+  actually playing, and with the setting off a sound file is just another
+  binary and no line of this code runs.
 
 **Settings**
 - `f9`, `ctrl+t`, `alt+,`, or a click on **settings** in the top right — any of
@@ -384,7 +390,7 @@ running whether or not they are on screen.
 ## Tests
 
 ```sh
-python3 tests/run_all.py       # 661 tests, ~5 min
+python3 tests/run_all.py       # 678 tests, ~5 min
 python3 tests/test_units.py    # editing core, instant
 python3 tests/test_saving.py   # what lands on disk, instant
 python3 tests/test_durability.py   # quick exits, signals, lost terminals
