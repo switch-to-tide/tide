@@ -60,11 +60,12 @@ class LookTest(unittest.TestCase):
 
 
 class TestPalettes(LookTest):
-    def test_each_appearance_offers_four(self):
+    def test_each_appearance_offers_its_own_palettes(self):
         self.assertEqual(theme.names_for('classic'),
                          ['dark', 'midnight', 'ember', 'light'])
         self.assertEqual(theme.names_for('modern'),
-                         ['dark', 'alien', 'forest', 'light'])
+                         ['dark', 'alien', 'forest', 'parchment', 'octopus',
+                          'light'])
 
     def test_the_classic_palettes_are_untouched(self):
         for name in theme.names_for('classic'):
@@ -118,7 +119,8 @@ class TestTheSettings(LookTest):
 
     def test_the_themes_on_offer_follow_the_appearance(self):
         self.assertEqual(store.choices('theme', {'appearance': 'modern'}),
-                         ['dark', 'alien', 'forest', 'light'])
+                         ['dark', 'alien', 'forest', 'parchment', 'octopus',
+                          'light'])
         self.assertEqual(store.choices('theme', {'appearance': 'classic'}),
                          ['dark', 'midnight', 'ember', 'light'])
 
@@ -188,8 +190,10 @@ class TestModernBoxes(LookTest):
         self.assertGreater(main.x, side.x2, 'the side and main boxes touch')
         self.assertGreater(side.x, 0, 'no margin on the left')
         self.assertLess(main.x2, app.screen.width, 'no margin on the right')
-        self.assertGreater(r['terminal_box'].y, main.y2,
-                           'the editor and terminal boxes touch')
+        # above and below they meet on adjacent rows: a blank row reads as
+        # twice the gap a blank column does, cells being taller than wide
+        self.assertEqual(r['terminal_box'].y, main.y2,
+                         'the editor and terminal boxes have drifted apart')
 
     def test_the_tabs_moved_inside_the_pane(self):
         app = self.app('modern', 'forest')

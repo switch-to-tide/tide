@@ -193,15 +193,16 @@ Requires Python 3.7+ and a terminal that speaks xterm mouse reporting
   you pick in one repository is there in every other one. Command line flags
   (`--theme`, `--max-lines`, …) override them for one session without changing
   the file.
-- Two **appearances**, each with four palettes:
+- Two **appearances**, each with its own palettes:
   - **classic** — the panes flush against each other, as they have always
     been: **dark** (the default), **midnight** (darker, cooler), **ember**
     (warm), **light**.
   - **modern** — the same layout with every pane drawn as a floating box:
     a thin rounded border, a little air between them, and the tabs inside the
     pane they belong to. Its palettes are **dark**, **alien** (very dark, with
-    the accents turned up), **forest** (very dark, green and slate) and
-    **light**.
+    the accents turned up), **forest** (very dark, green and slate),
+    **parchment** (dark and warm: beige and ochre), **octopus** (deep purple
+    on black, light grey to read by) and **light**.
   Everything else is identical between the two: the same panes in the same
   proportions, the same dividers to drag, split view, the review, all of it.
   `--appearance modern` tries one for a session, and naming a palette that
@@ -283,7 +284,9 @@ Requires Python 3.7+ and a terminal that speaks xterm mouse reporting
   changed — then they take the colour of that change.
 - The explorer marks changed files the way VS Code does: `U` in green for new
   files, `M` in orange for modified ones, `D` for deleted, `A` for staged, `!`
-  for conflicts. Folders containing changes are tinted too.
+  for conflicts. A folder carries the letter of what is inside it — `U` when
+  everything in there is new, `M` once anything in it has been modified — and
+  the colour that goes with it.
 - A change bar runs down the left of the editor gutter: **green** for lines
   added since the last commit, **blue** for lines edited, and a small **red**
   mark where lines were removed. The same colours appear as ticks down the
@@ -329,7 +332,8 @@ Requires Python 3.7+ and a terminal that speaks xterm mouse reporting
 
 **Panels**
 - File explorer, editor tabs, terminal, status bar. Click a pane to focus it,
-  or cycle with `f6`; `ctrl+b` / `ctrl+j` show and hide the side and bottom panels.
+  or cycle with `f6`; `f12` or `ctrl+b` shows and hides the explorer, `ctrl+j`
+  the bottom panel.
 - Both dividers drag: the line down the right of the explorer resizes it, and
   the `TERMINAL` bar resizes the bottom panel. Neither pane can be dragged
   away entirely, and where you leave them is where they are next time — the
@@ -356,7 +360,7 @@ Press `f1` inside the app for this list.
 | `f10`, or **review** | the whole working tree, as one review page (`esc` leaves) |
 | `alt+left` `alt+right` | previous / next tab |
 | `ctrl+t` | back to the tab you were on before (files with files, shells with shells) |
-| `ctrl+b` / `ctrl+j` | toggle explorer / bottom terminal panel |
+| `f12`, `ctrl+b` / `ctrl+j` | toggle explorer / bottom terminal panel |
 | `f2`, or the `Editor` / `Terminals` switch | switch the main area: editor <-> full-size terminal |
 | `f4` | new full-size terminal session |
 | `f6` | cycle focus between panes |

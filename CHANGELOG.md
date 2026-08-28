@@ -6,7 +6,20 @@ Versions are tagged in git as `v0.1.0` and so on, and the installer takes one:
 curl -fsSL https://raw.githubusercontent.com/switch-to-tide/tide/main/install.sh | sh -s -- 0.1.0
 ```
 
-## 0.1.14 — unreleased
+## 0.1.15 — unreleased
+
+- Two more modern palettes: **parchment**, dark but warm, in beige and ochre,
+  and **octopus**, deep purple on black with light grey to read by.
+- Forest is less relentlessly green: the scrollbar, the tab names and the
+  status text are grey again, and green is left to mean something - the
+  accent, and what git has to say.
+- `f12` shows and hides the explorer, as `ctrl+b` already did.
+- An ignored file's name is readable on the tab it is open in: the grey the
+  modern palettes greyed it with was too close to the tab's own background.
+- A folder in the explorer now shows a letter as well as a colour: `U` when
+  everything inside it is new, `M` once anything in it has been modified.
+
+## 0.1.14 — 2026-08-28
 
 - In the review, a file that was added or deleted is shown whole and full
   width, rather than side by side with an empty half: a green or red bar down

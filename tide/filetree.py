@@ -236,7 +236,7 @@ class FileTree(object):
             elif git:
                 fg = theme.git_colour(git)
             room = max(1, edge - 1 - rect.x - len(prefix) - len(mark) -
-                       (2 if git and not e.is_dir else 0))
+                       (2 if git else 0))
             label = prefix + mark + names.crop(e.name, room)
             screen.put(rect.x, y, label, fg=fg, bg=bg,
                        attr=0 if ignored else (BOLD if e.is_dir else 0),
@@ -245,7 +245,7 @@ class FileTree(object):
                 gx = rect.x + 1 + level
                 if gx < edge - 1:
                     screen.put(gx, y, '\u2502', fg=theme.TREE_GUIDE, bg=bg)
-            if git and not e.is_dir:
+            if git:                    # folders say what is inside them too
                 screen.put(edge - 1, y, git, fg=fg, bg=bg, attr=BOLD)
         self._render_edge(screen, rect, edge, h)
 

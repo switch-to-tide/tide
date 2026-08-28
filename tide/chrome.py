@@ -63,7 +63,10 @@ def arrange(rects):
         out['sidebar'] = inner(box)
     terminal, split = rects.get('terminal'), rects.get('split')
     top = tabs.y                       # the tabs live inside the pane's box
-    bottom = (terminal.y - 1) if terminal else editor.y2
+    # the boxes above and below meet on adjacent rows: a blank row between
+    # them looks like twice the gap a blank column does, cells being taller
+    # than they are wide
+    bottom = terminal.y if terminal else editor.y2
     height = max(3, bottom - top)
     if split is None:
         box = Rect(editor.x, top, max(3, editor.w - 1), height)

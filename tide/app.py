@@ -875,6 +875,13 @@ class App(object):
         self.settings['terminal_height'] = height
         settings_store.save(self.settings)
 
+    def toggle_tree(self):
+        """Show or hide the explorer; f12, or ctrl+b."""
+        self.show_tree = not self.show_tree
+        if not self.show_tree and self.focus == 'tree':
+            self.focus = 'editor'
+        self.need_render = True
+
     def hush_audio(self, keep=None):
         """One sound at a time: quieten every other audio tab.
 
@@ -1506,6 +1513,9 @@ class App(object):
         if combo == 'f5':
             self.toggle_split()
             return
+        if combo == 'f12':
+            self.toggle_tree()
+            return
         if combo == 'f7':
             self.open_git_diff(minimal=True)
             return
@@ -1552,10 +1562,7 @@ class App(object):
             self.prompt_open_path()
             return
         if combo == 'ctrl+b':
-            self.show_tree = not self.show_tree
-            if not self.show_tree and self.focus == 'tree':
-                self.focus = 'editor'
-            self.need_render = True
+            self.toggle_tree()
             return
         if combo == 'ctrl+n':
             self.new_file()

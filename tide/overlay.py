@@ -392,7 +392,7 @@ HELP_TEXT = [
         ('alt+a', 'toggle auto-save (on by default)'),
         ('alt+left / alt+right', 'previous / next tab'),
         ('ctrl+t', 'back to the tab you were on before'),
-        ('ctrl+b', 'toggle explorer'),
+        ('f12, ctrl+b', 'toggle explorer'),
     ]),
     ('Editing', [
         ('click / drag', 'move cursor / select'),
@@ -431,7 +431,7 @@ HELP_TEXT = [
         ('f5', 'split view: a file and a shell side by side'),
         ('</> button', 'in split view, start the shell for the right half'),
         ('f6', 'cycle focus: explorer / main / bottom terminal'),
-        ('ctrl+b', 'show/hide the explorer'),
+        ('f12, ctrl+b', 'show/hide the explorer'),
     ]),
     ('Git', [
         ('explorer letters', 'U new (green), M modified (orange), D deleted, A staged'),
