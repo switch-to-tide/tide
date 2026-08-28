@@ -6,7 +6,18 @@ Versions are tagged in git as `v0.1.0` and so on, and the installer takes one:
 curl -fsSL https://raw.githubusercontent.com/switch-to-tide/tide/main/install.sh | sh -s -- 0.1.0
 ```
 
-## 0.1.12 — unreleased
+## 0.1.14 — unreleased
+
+- In the review, a file that was added or deleted is shown whole and full
+  width, rather than side by side with an empty half: a green or red bar down
+  its edge, the line numbers, and the same syntax colours the editor gives it.
+  Modified files keep both sides. Read only, as the rest of the review is.
+
+## 0.1.13 — 2026-08-28
+
+- A sentence in the pipe advice ended better one clause earlier.
+
+## 0.1.12 — 2026-08-28
 
 - `tide --show-audio-pipe` says whether the pipe is up or down, and when it is
   down says what to check and how to set it up again. A tab that cannot reach

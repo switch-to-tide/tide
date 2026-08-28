@@ -16,12 +16,14 @@ import time
 
 from . import theme
 from . import names
+from .highlight import Highlighter, LineStates
 from .diff import GAP, DiffView, TEXT_X, _expand, align, trim
 from .keys import SHIFT
 from .term import BOLD, DIM, Rect
 
 HEAD = 'head'          # a file's heading inside the page
 RULE = 'rule'          # the line between two files
+WHOLE = 'whole'        # one line of a file that is all new, or all gone
 SCAN_EVERY = 2.0       # seconds between asking git for the list again
 
 STATUS_ORDER = {'U': 0, 'A': 1, 'M': 2, 'D': 3}
@@ -129,6 +131,28 @@ def _stat(path):
     return (getattr(st, 'st_mtime_ns', int(st.st_mtime * 1e9)), st.st_size)
 
 
+class _Painter(object):
+    """Syntax colours for a file shown whole, worked out as it is painted."""
+
+    def __init__(self, path, lines):
+        self.lines = lines
+        self.hl = Highlighter.for_path(path)
+        self.states = LineStates(self.hl)
+
+    def kinds(self, row):
+        """A token kind per column of that line, or None where there is none."""
+        if not 0 <= row < len(self.lines):
+            return []
+        line = self.lines[row]
+        state = self.states.state_for(self.lines, row)
+        spans, _rest = self.hl.tokens(line, state)
+        kinds = [None] * (len(line) + 1)
+        for start, end, kind in spans:
+            for i in range(start, min(end, len(line))):
+                kinds[i] = kind
+        return kinds
+
+
 class Node(object):
     """One line of the review's tree: a folder, or a file that changed."""
 
@@ -159,6 +183,7 @@ class Review(object):
         self.index = 0              # selected node
         self.collapsed = set()      # files folded away in the page
         self._seen = set()
+        self.whole = {}             # path -> the colouring for a whole file
         self.tree_top = 0
         self.top = 0
         self.cols = {'left': 0, 'right': 0}
@@ -213,28 +238,42 @@ class Review(object):
             starts[path] = len(rows)
             rows.append((HEAD, path, letter, shut, None))
             if not shut:
-                left = [] if letter in ('A', 'U') else \
-                    (self.git.file_at_rev(full, 'HEAD') or '').split('\n')
-                right = [] if letter == 'D' else (_read(full) or [])
-                body = trim(align(left, right))
-                if not body:
-                    body = [(None, '', None, 'no textual changes', GAP)]
-                rows.extend(body)
+                rows.extend(self._body(path, full, letter))
             rows.append((RULE, '', '', None, None))
         if not rows:
             rows = [(None, '', None, 'nothing has changed', GAP)]
         self.rows = rows
         self.starts = starts
         self.nodes = self._tree()
-        body_rows = [r for r in rows if r[0] not in (HEAD, RULE)]
+        body_rows = [r for r in rows if r[0] not in (HEAD, RULE, WHOLE)]
+        wide = max([len(_expand(r[2])) for r in rows if r[0] == WHOLE] or [0])
         self.widest = {
             'left': max([len(_expand(r[1])) for r in body_rows] or [0]),
             'right': max([len(_expand(r[3])) for r in body_rows
                           if r[4] != GAP] or [0]),
         }
+        self.widest['left'] = max(self.widest['left'], wide)
         self._order = sorted(self.starts.items(), key=lambda kv: kv[1])
         self.top = max(0, min(self.top, self.max_top()))
         self.index = max(0, min(self.index, max(0, len(self.nodes) - 1)))
+
+    def _body(self, path, full, letter):
+        """The rows for one file: whole if it is all new or all gone."""
+        if letter in ('A', 'U', 'D'):
+            if letter == 'D':
+                lines = (self.git.file_at_rev(full, 'HEAD') or '').split('\n')
+            else:
+                lines = _read(full) or []
+            while lines and lines[-1] == '':
+                lines.pop()
+            self.whole[path] = _Painter(path, lines)
+            rows = [(WHOLE, i + 1, line, letter, path)
+                    for i, line in enumerate(lines)]
+            return rows or [(None, '', None, 'the file is empty', GAP)]
+        left = (self.git.file_at_rev(full, 'HEAD') or '').split('\n')
+        right = _read(full) or []
+        body = trim(align(left, right))
+        return body or [(None, '', None, 'no textual changes', GAP)]
 
     def _tree(self):
         """Folders and files, in the shape the working tree has them."""
@@ -532,6 +571,9 @@ class Review(object):
                 screen.put(rect.x, y, '─' * rect.w, fg=theme.BORDER, bg=theme.BG,
                            max_x=rect.x2)
                 continue
+            if kind == WHOLE:
+                self._whole_row(screen, rect, y, row)
+                continue
             ln_l, text_l, ln_r, text_r, row_kind = row
             if row_kind == GAP:
                 screen.fill(rect.x, y, rect.w, 1, bg=theme.PANEL)
@@ -544,6 +586,39 @@ class Review(object):
                           row_kind, self.cols['right'])
             screen.put(rect.x + half - 1, y, '|', fg=theme.BORDER, bg=theme.BG)
         self._scrollbar(screen, rect, focused)
+
+    def _whole_row(self, screen, rect, y, row):
+        """One line of a file that is entirely new, or entirely gone.
+
+        The whole width, because there is nothing to put beside it: a bar
+        down the edge saying which, the line number, and the text in the
+        colours the editor would give it.
+        """
+        _mark, lineno, text, letter, path = row
+        added = letter in ('A', 'U')
+        colour = theme.GIT_LINE_ADDED if added else theme.GIT_LINE_DELETED
+        bg = theme.BG_ALT
+        screen.fill(rect.x, y, rect.w, 1, bg=bg)
+        screen.put(rect.x, y, '\u2503', fg=colour, bg=bg, attr=BOLD)
+        screen.put(rect.x + 2, y, str(lineno).rjust(5), fg=theme.LINENO, bg=bg)
+        screen.put(rect.x + 8, y, '+' if added else '-', fg=colour, bg=bg,
+                   attr=BOLD)
+        body = _expand(text)
+        offset = self.cols['left']
+        painter = self.whole.get(path)
+        kinds = painter.kinds(lineno - 1) if painter else []
+        x = rect.x + 10
+        limit = rect.x2 - 1
+        for i, char in enumerate(body[offset:]):
+            if x >= limit:
+                break
+            index = i + offset
+            kind = kinds[index] if index < len(kinds) else None
+            fg = theme.token_style(kind)[0] if kind else theme.FG
+            screen.put(x, y, char, fg=fg, bg=bg)
+            x += 1
+        if offset and body:
+            screen.put(rect.x + 9, y, '<', fg=theme.FG_DIM, bg=bg)
 
     @staticmethod
     def _file_head(screen, rect, y, path, letter, shut):

@@ -443,5 +443,119 @@ class TestReviewInASession(unittest.TestCase):
             self.assertEqual(f.read(), 'def greet():\n    return 2\n')
 
 
+class TestWholeFiles(ReviewTest):
+    """A file that is all new, or all gone, has nothing to sit beside."""
+
+    def setUp(self):
+        ReviewTest.setUp(self)
+        self.change_everything()
+        self.write('added.py', 'import os\n\n\ndef hello(name):\n'
+                               '    return "hi"  # a note\n')
+        self.a = self.app()
+        self.assertTrue(self.a.open_review())
+        for path in list(self.a.review.collapsed):
+            self.a.review.toggle(path)          # open them all
+        self.a.review.top = 0
+        self.a.render()
+
+    def rows_for(self, name):
+        from tide.review import WHOLE
+        rv = self.a.review
+        start = rv.starts[name]
+        out = []
+        for row in rv.rows[start + 1:]:
+            if row[0] != WHOLE:
+                break
+            out.append(row)
+        return out
+
+    def screen_rows(self):
+        rect = self.a.rects['editor']
+        return [(y, ''.join(c[0] or ' ' for c in self.a.screen.cells[y]))
+                for y in range(rect.y, rect.y2)]
+
+    def test_an_added_file_is_shown_whole(self):
+        rows = self.rows_for('added.py')
+        self.assertTrue(rows, 'the added file was not shown whole')
+        self.assertEqual([r[2] for r in rows][0], 'import os')
+        self.assertTrue(all(r[3] == 'U' for r in rows))
+
+    def test_a_deleted_file_is_shown_whole(self):
+        rows = self.rows_for('doomed.txt')
+        self.assertTrue(rows, 'the deleted file was not shown whole')
+        self.assertEqual(rows[0][2], 'delete me')
+        self.assertTrue(all(r[3] == 'D' for r in rows))
+
+    def test_a_modified_file_is_still_side_by_side(self):
+        from tide.review import WHOLE
+        rv = self.a.review
+        start = rv.starts['README.md']
+        after = rv.rows[start + 1]
+        self.assertNotEqual(after[0], WHOLE, 'a modified file lost its two sides')
+
+    def test_the_whole_rows_have_no_divider_down_the_middle(self):
+        for _y, line in self.screen_rows():
+            if 'import os' in line or 'delete me' in line:
+                middle = line[len(line) // 2]
+                self.assertNotEqual(middle, '|', 'a whole row was split in two')
+                return
+        raise AssertionError('neither file was painted')
+
+    def test_it_runs_the_full_width(self):
+        rect = self.a.rects['editor']
+        for y, line in self.screen_rows():
+            if 'return "hi"' in line:
+                self.assertGreater(line.index('return "hi"'),
+                                   rect.x + 8, 'no room left for the bar')
+                self.assertLess(line.index('return "hi"'),
+                                rect.x + rect.w // 2,
+                                'it is still being squeezed into one half')
+                return
+        raise AssertionError('the added file was not painted')
+
+    def test_the_bar_and_the_colours_in_every_theme(self):
+        from tide import theme
+        for look in ('classic', 'modern'):
+            for name in theme.names_for(look):
+                theme.apply(name, look)
+                self.a.screen.prev = None
+                self.a.render()
+                bars = {}
+                keyword = comment = None
+                for y in range(self.a.screen.height):
+                    cells = self.a.screen.cells[y]
+                    line = ''.join(c[0] or ' ' for c in cells)
+                    for cell in cells:
+                        if cell[0] == '┃':
+                            bars[cell[1]] = bars.get(cell[1], 0) + 1
+                    if ' + import os' in line:
+                        keyword = cells[line.index('import os')][1]
+                    if '# a note' in line:
+                        comment = cells[line.index('# a note')][1]
+                where = '%s/%s' % (look, name)
+                self.assertIn(theme.GIT_LINE_ADDED, bars,
+                              'no green bar in %s' % where)
+                self.assertIn(theme.GIT_LINE_DELETED, bars,
+                              'no red bar in %s' % where)
+                self.assertEqual(keyword, theme.token_style('keyword')[0],
+                                 'the keyword is not highlighted in %s' % where)
+                self.assertEqual(comment, theme.token_style('comment')[0],
+                                 'the comment is not highlighted in %s' % where)
+        theme.apply('dark', 'classic')
+
+    def test_folding_one_away_still_works(self):
+        rv = self.a.review
+        rv.toggle('added.py')
+        self.assertEqual(self.rows_for('added.py'), [])
+        self.a.render()
+        self.assertNotIn('import os', self.whole(self.a))
+
+    def test_none_of_it_can_be_edited(self):
+        before = open(os.path.join(self.tmp, 'added.py')).read()
+        for ch in 'XYZ':
+            self.a.handle_key(Key('char', char=ch))
+        self.assertEqual(open(os.path.join(self.tmp, 'added.py')).read(), before)
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

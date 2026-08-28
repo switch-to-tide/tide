@@ -294,7 +294,10 @@ Requires Python 3.7+ and a terminal that speaks xterm mouse reporting
   working tree on one page, the way a commit reads on a forge: the files that
   changed down the left in their folders, and one long side-by-side diff you
   scroll from the first to the last, a rule between them. Each file has a
-  heading with a triangle — click it to fold that file away. Added and deleted
+  heading with a triangle — click it to fold that file away. A file that was
+  added or deleted is shown whole, across the full width with a green or red
+  bar down its edge and the editor's own syntax colours, since there is
+  nothing to put beside it. Added and deleted
   files start folded, and which kinds start open is in the settings.
   It is read only, it takes over the screen without touching what is behind it
   (your tabs, your split, your running shells all come back), the shell docked
@@ -414,7 +417,7 @@ running whether or not they are on screen.
 ## Tests
 
 ```sh
-python3 tests/run_all.py       # 713 tests, ~5 min
+python3 tests/run_all.py       # 721 tests, ~5 min
 python3 tests/test_units.py    # editing core, instant
 python3 tests/test_saving.py   # what lands on disk, instant
 python3 tests/test_durability.py   # quick exits, signals, lost terminals
