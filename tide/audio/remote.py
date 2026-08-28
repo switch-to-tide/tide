@@ -528,7 +528,7 @@ def describe(settings, out):
     out.write('Check that the sink is still running where you are sitting,\n'
               'and that the ssh connection carrying the port is this one.\n'
               'To set it up again from scratch, turn audio off and on in the\n'
-              'settings (f9) - the panel asks from the beginning each time.\n')
+              'settings (f9).\n')
     return 1
 
 
