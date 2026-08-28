@@ -310,6 +310,8 @@ Requires Python 3.7+ and a terminal that speaks xterm mouse reporting
   are things you already do in a shell — and there is one right there.
 
 **Built-in terminals**
+- The shell's text starts a column in from the edge of its pane, rather than
+  hard against it.
 - Real shells on ptys, not command runners: prompts, colours, job control,
   `ctrl+c`, and full-screen programs (`less`, `vi`, `top`, a Python REPL) all
   work, because each panel is a VT100/xterm emulator.
@@ -331,6 +333,11 @@ Requires Python 3.7+ and a terminal that speaks xterm mouse reporting
   scrolls independently and keeps its position when you switch away and back.
 
 **Panels**
+- `ctrl+l`, or the **↻** button in the top right, paints the whole screen
+  again: it opens and closes nothing, it simply stops believing what it
+  thinks is up there. For when something else has written over the terminal
+  and left characters stranded. A shell keeps `ctrl+l` for itself when it has
+  the keyboard, as it should.
 - File explorer, editor tabs, terminal, status bar. Click a pane to focus it,
   or cycle with `f6`; `f12` or `ctrl+b` shows and hides the explorer, `ctrl+j`
   the bottom panel.
@@ -361,6 +368,7 @@ Press `f1` inside the app for this list.
 | `alt+left` `alt+right` | previous / next tab |
 | `ctrl+t` | back to the tab you were on before (files with files, shells with shells) |
 | `f12`, `ctrl+b` / `ctrl+j` | toggle explorer / bottom terminal panel |
+| `ctrl+l`, or **↻** | paint the whole screen again |
 | `f2`, or the `Editor` / `Terminals` switch | switch the main area: editor <-> full-size terminal |
 | `f4` | new full-size terminal session |
 | `f6` | cycle focus between panes |

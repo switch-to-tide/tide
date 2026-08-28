@@ -94,7 +94,9 @@ class TestLayout(IDETest):
 
     def test_help_overlay(self):
         self.s.key(F1)
-        self.assertIn('toggle comment', self.s.screen())
+        # the list is longer than a 24 row window, so check something the
+        # second section shows before it runs off the bottom
+        self.assertIn('undo / redo', self.s.screen())
         self.s.key(ESCAPE)
         self.assertNotIn('toggle comment', self.s.screen())
 

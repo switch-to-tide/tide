@@ -6,7 +6,17 @@ Versions are tagged in git as `v0.1.0` and so on, and the installer takes one:
 curl -fsSL https://raw.githubusercontent.com/switch-to-tide/tide/main/install.sh | sh -s -- 0.1.0
 ```
 
-## 0.1.15 — unreleased
+## 0.1.16 — unreleased
+
+- The shells sit a column in from the edge of their pane, both the docked one
+  and the full-size ones: a prompt hard against the border read as a mistake.
+- `ctrl+l`, or the **↻** button beside the settings, paints the whole screen
+  again - for when something has written over the terminal and left
+  characters stranded. It changes nothing: no window opens or closes, it only
+  stops trusting what it thinks is on screen. A focused shell still gets
+  `ctrl+l` for itself.
+
+## 0.1.15 — 2026-08-28
 
 - Two more modern palettes: **parchment**, dark but warm, in beige and ochre,
   and **octopus**, deep purple on black with light grey to read by.

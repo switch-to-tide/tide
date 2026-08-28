@@ -875,6 +875,24 @@ class App(object):
         self.settings['terminal_height'] = height
         settings_store.save(self.settings)
 
+    def repaint(self):
+        """Paint the whole screen again, as if nothing were on it.
+
+        Something else writing to the terminal - a program in a shell, a
+        resize the terminal never told us about - can leave characters
+        stranded where tide believes it has already drawn. Forgetting what we
+        think is up there, wiping it, and painting again puts it right without
+        touching a single tab, pane or shell.
+        """
+        self.check_resize()
+        self.screen.prev = None            # nothing on screen is to be trusted
+        try:
+            self.out.write('\x1b[2J')       # and wipe what anything else left
+            self.out.flush()
+        except Exception:
+            pass
+        self.need_render = True
+
     def toggle_tree(self):
         """Show or hide the explorer; f12, or ctrl+b."""
         self.show_tree = not self.show_tree
@@ -1105,12 +1123,15 @@ class App(object):
                 x += len(label) + 1
         # the buttons, laid out right to left with the same gap between each
         self.settings_span = None
+        self.repaint_span = None
         self.review_span = None
         self.new_term_span = None
         self.diff_spans = []
         cx = rect.x2
         cx, self.settings_span = self._chip(scr, rect, cx, x, ' settings ',
                                             theme.TAB_MARK)
+        cx, self.repaint_span = self._chip(scr, rect, cx, x, ' \u21bb ',
+                                           theme.FG_DIM)
         if self.git.enabled:
             cx, self.review_span = self._chip(scr, rect, cx, x, ' review ',
                                               theme.GIT_LINE_ADDED)
@@ -1552,6 +1573,9 @@ class App(object):
             if self.tree.on_key(key):
                 self.need_render = True
                 return
+        if combo == 'ctrl+l':
+            self.repaint()
+            return
         if combo == 'ctrl+q':
             self.quit()
             return
@@ -1799,6 +1823,10 @@ class App(object):
             return
         if self.new_term_span and self.new_term_span[0] <= ev.x < self.new_term_span[1]:
             self.new_big_terminal()
+            return
+        span = getattr(self, 'repaint_span', None)
+        if span and span[0] <= ev.x < span[1]:
+            self.repaint()
             return
         span = getattr(self, 'review_span', None)
         if span and span[0] <= ev.x < span[1]:

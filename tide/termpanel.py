@@ -204,7 +204,13 @@ class TerminalPanel(object):
 
     def render(self, screen, rect, focused):
         self.rect = rect
-        self.view_rect = Rect(rect.x, rect.y + 1, rect.w, rect.h - 1) if self.header else rect
+        # a column of air on the left: a prompt hard against the edge of the
+        # pane reads as a mistake, and the shell never misses the column
+        inset = 1 if rect.w > 8 else 0
+        self.view_rect = (Rect(rect.x + inset, rect.y + 1,
+                               rect.w - inset, rect.h - 1) if self.header
+                          else Rect(rect.x + inset, rect.y,
+                                    rect.w - inset, rect.h))
         r = self.view_rect
         self.resize(r.w, r.h)
         if self.shell is None:
@@ -212,7 +218,7 @@ class TerminalPanel(object):
         if self.header:
             self._render_header(screen, rect, focused)
 
-        screen.fill(r.x, r.y, r.w, r.h, bg=theme.TERM_BG)
+        screen.fill(rect.x, r.y, rect.w, r.h, bg=theme.TERM_BG)
         rows = self.vt.view(self.scroll)
         sel = None
         if self.sel_start and self.sel_end:

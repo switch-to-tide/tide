@@ -393,6 +393,7 @@ HELP_TEXT = [
         ('alt+left / alt+right', 'previous / next tab'),
         ('ctrl+t', 'back to the tab you were on before'),
         ('f12, ctrl+b', 'toggle explorer'),
+        ('ctrl+l, or \u21bb', 'paint the whole screen again'),
     ]),
     ('Editing', [
         ('click / drag', 'move cursor / select'),
