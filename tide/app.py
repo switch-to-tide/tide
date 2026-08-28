@@ -255,6 +255,7 @@ class App(object):
         except Exception as exc:               # never let this break opening
             self.status('Cannot play %s: %s' % (os.path.basename(path), exc))
             return None
+        self.hush_audio()                      # nothing else keeps playing
         cur = self.editor
         if (cur and cur.path is None and not cur.doc.dirty
                 and cur.doc.text() == '' and len(self.editors) == 1):
@@ -857,6 +858,19 @@ class App(object):
             if found and found != panel.program:
                 panel.program = found
                 self.need_render = True
+
+    def hush_audio(self, keep=None):
+        """One sound at a time: quieten every other audio tab.
+
+        Two players talking to one sink - or to one pair of speakers - is
+        nobody's idea of playback, and the sink only makes one sound anyway.
+        """
+        for tab in self.editors:
+            if getattr(tab, 'is_audio', False) and tab is not keep:
+                try:
+                    tab.player.stop(keep_position=True)
+                except Exception:
+                    pass
 
     def _audio_busy(self):
         """Whether the tab on screen is playing something and wants repainting."""

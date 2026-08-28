@@ -6,7 +6,17 @@ Versions are tagged in git as `v0.1.0` and so on, and the installer takes one:
 curl -fsSL https://raw.githubusercontent.com/switch-to-tide/tide/main/install.sh | sh -s -- 0.1.0
 ```
 
-## 0.1.8 — unreleased
+## 0.1.9 — unreleased
+
+- **Two sound tabs no longer wedge the screen.** The sink served one
+  conversation at a time, so a second tab asking to play waited behind the
+  first and the far side sat waiting for a reply that never came. Connections
+  are now served from one select loop, several tabs can be connected at once,
+  and starting one stops whatever else was playing - on either machine, one
+  sound at a time. Every wait on the far side is bounded as well, so a stalled
+  tunnel shows an error in the tab instead of holding up the editor.
+
+## 0.1.8 — 2026-08-28
 
 - **Sound from an ssh session, out of the machine you are sitting at.**
   Turning audio on now asks where the sound should come out. *This machine*

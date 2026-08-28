@@ -142,7 +142,7 @@ class Link(object):
         self.lines = Lines(sock)
         return True
 
-    def _tell(self, message, timeout=10.0):
+    def _tell(self, message, timeout=3.0):
         if not self.connect():
             return None
         try:
@@ -171,6 +171,7 @@ class Link(object):
             return False
         try:
             size = os.path.getsize(self.path)
+            self.sock.settimeout(20.0)     # a stalled tunnel must not hang us
             _send(self.sock, {'tide': VERSION, 'do': 'file', 'size': size,
                               'name': os.path.basename(self.path)})
             with open(self.path, 'rb') as f:
@@ -179,7 +180,7 @@ class Link(object):
                     if not block:
                         break
                     self.sock.sendall(block)
-            reply = self.lines.read(60.0)
+            reply = self.lines.read(30.0)
         except (OSError, socket.error) as exc:
             self.error = 'could not send it to the sink (%s)' % exc
             self.close_socket()
@@ -310,98 +311,70 @@ def reachable(port=PORT, timeout=1.0):
 
 # ------------------------------------------------- the near side (the sink)
 
-class Sink(object):
-    """Runs where you are sitting, and plays what the far side sends."""
+class Conn(object):
+    """One conversation with one audio tab on the far side."""
 
-    def __init__(self, port=PORT, out=None):
-        self.port = port
-        self.out = out
+    def __init__(self, sock, sink):
+        self.sock = sock
+        self.sink = sink
+        self.lines = Lines(sock)
         self.player = None
         self.temp = None
+        self.name = '?'
 
-    def say(self, message):
-        if self.out is not None:
-            self.out.write(message + '\n')
-            self.out.flush()
-
-    def serve(self, once=False):
-        from .player import backend
-        here = backend()
-        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        server.bind(('127.0.0.1', self.port))
-        server.listen(1)
-        self.say('tide audio sink listening on 127.0.0.1:%d' % self.port)
-        self.say('playing through %s' % (here.name if here else
-                                         'nothing - no player found here'))
-        self.say('leave this running; ctrl+c stops it')
+    # -- one message, or False when the far side has gone
+    def pump(self):
         try:
-            while True:
-                sock, _who = server.accept()
-                try:
-                    self.talk(sock)
-                finally:
-                    self.finish()
-                    try:
-                        sock.close()
-                    except Exception:
-                        pass
-                if once:
-                    return
-        finally:
-            try:
-                server.close()
-            except Exception:
-                pass
+            message = self.lines.read(5.0)
+        except (OSError, socket.error, socket.timeout):
+            return False
+        if message is None:
+            return False
+        try:
+            self.answer(message)
+        except (OSError, socket.error):
+            return False
+        return True
 
-    def talk(self, sock):
-        """One conversation, for as long as the far side keeps it open."""
+    def answer(self, message):
         from .player import backend
-        lines = Lines(sock)
-        while True:
-            try:
-                message = lines.read(None)
-            except (OSError, socket.error):
-                return
-            if message is None:
-                return
-            do = message.get('do')
-            if do == 'hello':
-                here = backend()
-                _send(sock, {'ok': True, 'greeting': GREETING,
-                             'tide': VERSION,
-                             'backend': here.name if here else None})
-            elif do == 'file':
-                _send(sock, self.take_file(lines, message))
-            elif do == 'play':
-                _send(sock, self.do_play(message))
-            elif do == 'pause':
-                _send(sock, {'ok': bool(self.player and self.player.pause())})
-            elif do == 'resume':
-                _send(sock, {'ok': bool(self.player and self.player.resume())})
-            elif do == 'where':
-                _send(sock, {'ok': True,
-                             'at': self.player.position() if self.player else 0,
-                             'done': bool(self.player and self.player.finished())})
-            elif do == 'stop':
-                if self.player:
-                    self.player.stop()
-                _send(sock, {'ok': True})
-            else:
-                _send(sock, {'ok': False, 'error': 'unknown request'})
+        do = message.get('do')
+        if do == 'hello':
+            here = backend()
+            _send(self.sock, {'ok': True, 'greeting': GREETING,
+                              'tide': VERSION,
+                              'backend': here.name if here else None})
+        elif do == 'file':
+            _send(self.sock, self.take_file(message))
+        elif do == 'play':
+            _send(self.sock, self.do_play(message))
+        elif do == 'pause':
+            _send(self.sock, {'ok': bool(self.player and self.player.pause())})
+        elif do == 'resume':
+            self.sink.only(self)
+            _send(self.sock, {'ok': bool(self.player and self.player.resume())})
+        elif do == 'where':
+            _send(self.sock, {'ok': True,
+                              'at': self.player.position() if self.player else 0,
+                              'done': bool(self.player and self.player.finished())})
+        elif do == 'stop':
+            self.silence()
+            _send(self.sock, {'ok': True})
+        else:
+            _send(self.sock, {'ok': False, 'error': 'unknown request'})
 
-    def take_file(self, lines, message):
+    def take_file(self, message):
         from .player import Player
         size = int(message.get('size') or 0)
-        name = os.path.basename(message.get('name') or 'sound')
-        self.finish()
+        self.name = os.path.basename(message.get('name') or 'sound')
+        self.finish(keep_socket=True)
         handle, path = tempfile.mkstemp(prefix='tide-sink-',
-                                        suffix=os.path.splitext(name)[1])
+                                        suffix=os.path.splitext(self.name)[1])
         try:
             with os.fdopen(handle, 'wb') as f:
                 left = size
                 while left > 0:
-                    block = lines.take(min(CHUNK, left))
+                    block = self.lines.take(min(CHUNK, left))
                     if not block:
                         break
                     f.write(block)
@@ -410,7 +383,7 @@ class Sink(object):
             return {'ok': False, 'error': str(exc)}
         self.temp = path
         self.player = Player(path)
-        self.say('received %s (%.1f KB)' % (name, size / 1024.0))
+        self.sink.say('%s: received (%.1f KB)' % (self.name, size / 1024.0))
         if self.player.backend is None:
             return {'ok': False, 'error': 'nothing here can play that'}
         return {'ok': True, 'duration': self.player.duration,
@@ -419,24 +392,105 @@ class Sink(object):
     def do_play(self, message):
         if self.player is None:
             return {'ok': False, 'error': 'nothing has been sent yet'}
+        self.sink.only(self)               # one sound at a time
         rate = float(message.get('rate') or 1.0)
         if rate != self.player.rate:
             self.player.rate = rate
-        started = self.player.play(float(message.get('at') or 0.0))
-        if not started:
-            return {'ok': False, 'error': self.player.error or 'it would not play'}
+        if not self.player.play(float(message.get('at') or 0.0)):
+            return {'ok': False, 'error': self.player.error or
+                    'it would not play'}
+        self.sink.say('%s: playing' % self.name)
         return {'ok': True}
 
-    def finish(self):
+    def silence(self):
         if self.player is not None:
             self.player.stop()
-            self.player = None
+
+    def finish(self, keep_socket=False):
+        self.silence()
+        self.player = None
         if self.temp:
             try:
                 os.remove(self.temp)
             except OSError:
                 pass
             self.temp = None
+        if not keep_socket:
+            try:
+                self.sock.close()
+            except Exception:
+                pass
+
+
+class Sink(object):
+    """Runs where you are sitting, and plays what the far side sends.
+
+    Several tabs can be connected at once - one per audio file open over
+    there - and only one of them makes a sound at a time. Connections are
+    served from a select loop, so a second tab asking to play never waits
+    behind the first.
+    """
+
+    def __init__(self, port=PORT, out=None):
+        self.port = port
+        self.out = out
+        self.conns = {}
+
+    def say(self, message):
+        if self.out is not None:
+            self.out.write(message + '\n')
+            self.out.flush()
+
+    def only(self, winner):
+        """Stop whatever else was playing; one sound at a time."""
+        for conn in self.conns.values():
+            if conn is not winner:
+                conn.silence()
+
+    def serve(self, once=False):
+        import select
+        from .player import backend
+        here = backend()
+        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind(('127.0.0.1', self.port))
+        server.listen(8)
+        self.say('tide audio sink listening on 127.0.0.1:%d' % self.port)
+        self.say('playing through %s' % (here.name if here else
+                                         'nothing - no player found here'))
+        self.say('leave this running; ctrl+c stops it')
+        served = 0
+        try:
+            while True:
+                watching = [server] + [c.sock for c in self.conns.values()]
+                try:
+                    ready, _w, _x = select.select(watching, [], [], 0.5)
+                except (OSError, select.error):
+                    ready = []
+                for sock in ready:
+                    if sock is server:
+                        conn, _who = server.accept()
+                        self.conns[conn] = Conn(conn, self)
+                        continue
+                    conn = self.conns.get(sock)
+                    if conn is None or not conn.pump():
+                        self.drop(sock)
+                        served += 1
+                if once and served and not self.conns:
+                    return
+        finally:
+            for sock in list(self.conns):
+                self.drop(sock)
+            try:
+                server.close()
+            except Exception:
+                pass
+
+    def drop(self, sock):
+        conn = self.conns.pop(sock, None)
+        if conn is not None:
+            conn.finish()
+            self.say('%s: gone' % conn.name)
 
 
 def serve(port=PORT, out=None, once=False):

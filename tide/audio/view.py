@@ -228,7 +228,14 @@ class AudioView(object):
         """Deleted, with no copy of our own: there is nothing left to play."""
         return self.missing and not self.rescued
 
+    def solo(self):
+        """Before making a sound, stop whatever else was making one."""
+        hush = getattr(self.app, 'hush_audio', None)
+        if hush is not None:
+            hush(self)
+
     def toggle(self):
+        self.solo()
         if self.lost():
             if self.player.playing:
                 return self.player.pause()     # let what is playing be stopped
@@ -246,6 +253,7 @@ class AudioView(object):
         self.player.set_rate(SPEEDS[(i + step) % len(SPEEDS)])
 
     def seek_to_fraction(self, fraction):
+        self.solo()
         if self.lost() or not self.player.duration:
             return False
         if not self.player.can_seek():
@@ -265,8 +273,10 @@ class AudioView(object):
         elif name in ('left', 'right', 'home') and self.lost():
             self.app.status('%s has been deleted' % self.title)
         elif name == 'left':
+            self.solo()
             self.player.nudge(-STEP)
         elif name == 'right':
+            self.solo()
             self.player.nudge(STEP)
         elif name == 'home':
             self.player.seek(0.0)
