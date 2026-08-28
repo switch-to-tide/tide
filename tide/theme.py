@@ -5,6 +5,13 @@ of rewriting these module globals and asking for a repaint.
 """
 
 # ---------------------------------------------------------------- palettes
+#
+# Two appearances live here. The modern one - floating boxes, the palettes
+# further down - is what tide looks like, and the only one the settings panel
+# offers. The classic one below it, and its four palettes, are deprecated:
+# nothing chooses them but `--appearance classic`, which is kept so that the
+# flush layout still has a way in and stays under test. Do not add palettes to
+# classic; add them to modern.
 
 # "dark" - the default, in the spirit of VS Code's Dark+
 DARK = dict(
@@ -211,6 +218,8 @@ M_OCTOPUS = dict(
 )
 
 APPEARANCES = {
+    # classic is deprecated: reachable with --appearance classic, not offered
+    # in the settings, and kept so the flush layout goes on being exercised
     'classic': {'dark': DARK, 'midnight': MIDNIGHT, 'ember': EMBER,
                 'light': LIGHT},
     'modern': {'dark': M_DARK, 'alien': M_ALIEN, 'forest': M_FOREST,

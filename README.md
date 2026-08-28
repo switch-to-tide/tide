@@ -193,20 +193,16 @@ Requires Python 3.7+ and a terminal that speaks xterm mouse reporting
   you pick in one repository is there in every other one. Command line flags
   (`--theme`, `--max-lines`, …) override them for one session without changing
   the file.
-- Two **appearances**, each with its own palettes:
-  - **classic** — the panes flush against each other, as they have always
-    been: **dark** (the default), **midnight** (darker, cooler), **ember**
-    (warm), **light**.
-  - **modern** — the same layout with every pane drawn as a floating box:
-    a thin rounded border, a little air between them, and the tabs inside the
-    pane they belong to. Its palettes are **dark**, **alien** (very dark, with
-    the accents turned up), **forest** (very dark, green and slate),
-    **parchment** (dark and warm: beige and ochre), **octopus** (deep purple
-    on black, light grey to read by) and **light**.
-  Everything else is identical between the two: the same panes in the same
-  proportions, the same dividers to drag, split view, the review, all of it.
-  `--appearance modern` tries one for a session, and naming a palette that
-  only one appearance has brings that appearance with it (`--theme forest`).
+- Every pane is a floating box: a thin rounded border, a little air between
+  them, and the tabs inside the pane they belong to. Six palettes — **dark**
+  (the default), **alien** (very dark, with the accents turned up),
+  **forest** (very dark, green and slate), **parchment** (dark and warm:
+  beige and ochre), **octopus** (deep purple on black, light grey to read by)
+  and **light**.
+- There was a second appearance, **classic**, with the panes flush against
+  each other and four palettes of its own. It is deprecated: the settings no
+  longer offer it and it is not what tide looks like, but the code is still
+  there and `--appearance classic` still reaches it for a session.
 
 > `cmd+,` cannot reach a terminal program: macOS keeps it for the terminal's
 > own preferences, and nothing is sent to the app. On a Mac laptop `f9` may

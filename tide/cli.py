@@ -184,7 +184,8 @@ def main(argv=None):
                     help='update the installed copy, to the newest code or to '
                          'a version, and exit')
     ap.add_argument('--appearance', default=None, choices=['classic', 'modern'],
-                    help='flush panes (classic) or floating boxes (modern)')
+                    help='floating boxes (modern), or the deprecated flush '
+                         'panes (classic)')
     ap.add_argument('--theme', default=None,
                     choices=sorted(set(theme.names_for('classic') +
                                        theme.names_for('modern'))),

@@ -5,7 +5,7 @@ import json
 import os
 
 DEFAULTS = {
-    'appearance': 'classic',
+    'appearance': 'modern',
     'theme': 'dark',
     'autosave': True,
     'autosave_delay': 0.8,
@@ -25,8 +25,9 @@ DEFAULTS = {
 }
 
 # key, label, the values it cycles through
+# 'appearance' is deliberately not here: the modern one is what tide looks
+# like now, and classic is kept only for the --appearance flag (see theme.py)
 FIELDS = [
-    ('appearance', 'Appearance', ['classic', 'modern']),
     ('theme', 'Theme', ['dark', 'midnight', 'ember', 'light']),
     ('autosave', 'Auto-save', [True, False]),
     ('autosave_delay', 'Auto-save after', [0.3, 0.5, 0.8, 1.0, 2.0, 5.0]),
@@ -43,7 +44,6 @@ FIELDS = [
 ]
 
 HINTS = {
-    'appearance': 'flush panes, or floating boxes',
     'theme': 'colours for the whole app',
     'autosave': 'save shortly after you type',
     'autosave_delay': 'seconds of quiet before saving',
@@ -68,6 +68,8 @@ def config_path():
 
 
 CHOICES = dict((key, options) for key, _label, options in FIELDS)
+# not a field any more, but a hand-edited file still has to make sense
+CHOICES['appearance'] = ['classic', 'modern']
 
 
 def choices(key, values=None):

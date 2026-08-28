@@ -112,10 +112,26 @@ class TestPalettes(LookTest):
 
 
 class TestTheSettings(LookTest):
-    def test_appearance_is_a_setting_with_two_values(self):
-        self.assertEqual(store.DEFAULTS['appearance'], 'classic')
-        self.assertIn(('appearance', 'Appearance', ['classic', 'modern']),
-                      store.FIELDS)
+    def test_the_panel_does_not_offer_the_appearance_any_more(self):
+        # classic is deprecated: --appearance still reaches it, the settings
+        # do not
+        self.assertEqual(store.DEFAULTS['appearance'], 'modern')
+        self.assertNotIn('appearance', [key for key, _l, _v in store.FIELDS])
+
+    def test_a_session_is_modern_whatever_is_written_down(self):
+        import io
+        from tide.term import Screen
+        folder = os.path.dirname(store.config_path())
+        if not os.path.isdir(folder):
+            os.makedirs(folder)
+        with open(store.config_path(), 'w') as f:
+            f.write('{"appearance": "classic", "theme": "midnight"}')
+        app = App(root=self.tmp, paths=[], out=io.StringIO())
+        app.screen = Screen(90, 20)
+        self.assertEqual(app.settings['appearance'], 'modern')
+        self.assertEqual(app.settings['theme'], 'dark',
+                         'midnight is a classic palette; it should fall back')
+        self.assertTrue(theme.BOXED)
 
     def test_the_themes_on_offer_follow_the_appearance(self):
         self.assertEqual(store.choices('theme', {'appearance': 'modern'}),
@@ -152,7 +168,7 @@ class TestTheSettings(LookTest):
         with open(path, 'w') as f:
             f.write('{"appearance": "sideways", "theme": "puce"}')
         values = store.load()
-        self.assertEqual(values['appearance'], 'classic')
+        self.assertEqual(values['appearance'], 'modern')
         self.assertEqual(values['theme'], 'dark')
 
 
@@ -354,8 +370,9 @@ class TestModernInASession(unittest.TestCase):
         finally:
             s.close()
 
-    def test_classic_looks_exactly_as_it_did(self):
-        s = Session([os.path.join(self.tmp, 'code.py'), self.tmp],
+    def test_classic_is_still_there_behind_the_flag(self):
+        s = Session(['--appearance', 'classic',
+                     os.path.join(self.tmp, 'code.py'), self.tmp],
                     cols=90, rows=22, cwd=self.tmp)
         try:
             painted = s.screen()

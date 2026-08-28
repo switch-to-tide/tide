@@ -6,7 +6,16 @@ Versions are tagged in git as `v0.1.0` and so on, and the installer takes one:
 curl -fsSL https://raw.githubusercontent.com/switch-to-tide/tide/main/install.sh | sh -s -- 0.1.0
 ```
 
-## 0.1.17 — unreleased
+## 0.1.18 — unreleased
+
+- **The classic appearance is deprecated.** The settings panel no longer
+  offers a choice: tide is the modern one, with its six palettes. The classic
+  code and its four palettes are still there, reachable with
+  `--appearance classic` and still under test, but nothing in the settings
+  will take you there and a session started from a settings file that says
+  classic comes up modern.
+
+## 0.1.17 — 2026-08-28
 
 - In the classic appearance a highlighted row in the explorer ran through the
   vertical line at its edge, since the row was being filled across the column

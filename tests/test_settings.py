@@ -125,14 +125,14 @@ class TestAppSettings(unittest.TestCase):
 
     def test_changes_are_written_and_applied(self):
         app = self.app()
-        app.set_setting('theme', 'ember')
+        app.set_setting('theme', 'forest')
         app.set_setting('max_mb', 5.0)
         app.set_setting('show_terminal', False)
-        self.assertEqual(theme.current, 'ember')
+        self.assertEqual(theme.current, 'forest')
         self.assertEqual(app.max_file_bytes, int(5 * 1024 * 1024))
         self.assertFalse(app.show_term)
         stored = settings.load(settings.config_path())
-        self.assertEqual(stored['theme'], 'ember')
+        self.assertEqual(stored['theme'], 'forest')
         self.assertEqual(stored['max_mb'], 5.0)
         self.assertFalse(stored['show_terminal'])
 
@@ -237,17 +237,16 @@ class TestSettingsPanel(unittest.TestCase):
     def test_changing_the_theme_repaints_and_persists(self):
         before = self.s.cell(60, 4)[2]
         self.s.key(F9)
-        self.s.key(DOWN)                     # appearance -> theme
-        self.s.key(RIGHT)                    # dark -> midnight
+        self.s.key(RIGHT)                    # dark -> alien
         self.s.key(ESC)
         self.s.pump(0.4)
         self.assertNotEqual(self.s.cell(60, 4)[2], before, 'the screen did not repaint')
-        self.assertEqual(self.stored()['theme'], 'midnight')
+        self.assertEqual(self.stored()['theme'], 'alien')
 
     def test_light_theme_really_is_light(self):
         self.s.key(F9)
-        self.s.key(DOWN)                     # appearance -> theme
-        for _ in range(3):                   # dark -> midnight -> ember -> light
+        for _ in range(5):    # dark -> alien -> forest -> parchment -> octopus
+                              #      -> light
             self.s.key(RIGHT)
         self.s.key(ESC)
         self.s.pump(0.4)
@@ -288,14 +287,13 @@ class TestSettingsPanel(unittest.TestCase):
 
     def test_settings_survive_a_restart(self):
         self.s.key(F9)
-        self.s.key(DOWN)                     # appearance -> theme
-        self.s.key(RIGHT)                    # theme -> midnight
+        self.s.key(RIGHT)                    # theme -> alien
         self.s.key(ESC)
         self.s.pump(0.4)
         self.s.close()
         self.s = self.session()
         self.s.key(F9)
-        self.assertIn('midnight', self.s.screen())
+        self.assertIn('alien', self.s.screen())
 
     def test_the_file_is_the_documented_one(self):
         self.s.key(F9)

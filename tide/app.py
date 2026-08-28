@@ -33,7 +33,12 @@ class App(object):
     def __init__(self, root='.', paths=(), out=None, in_fd=None):
         self.root = os.path.abspath(root)
         self.settings = settings_store.load()
-        theme.apply(self.settings['theme'], self.settings.get('appearance'))
+        # the settings only ever mean the modern appearance; classic lives on
+        # behind --appearance, and is not offered in the panel any more
+        self.settings['appearance'] = 'modern'
+        name = theme.apply(self.settings['theme'], 'modern')
+        if name != self.settings['theme']:
+            self.settings['theme'] = name      # it was a palette classic had
         self.out = out or sys.stdout
         self.in_fd = in_fd if in_fd is not None else sys.stdin.fileno()
         self.editors = []
