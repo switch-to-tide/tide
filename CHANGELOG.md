@@ -6,7 +6,21 @@ Versions are tagged in git as `v0.1.0` and so on, and the installer takes one:
 curl -fsSL https://raw.githubusercontent.com/switch-to-tide/tide/main/install.sh | sh -s -- 0.1.0
 ```
 
-## 0.1.3 — unreleased
+## 0.1.4 — unreleased
+
+- **Audio playback.** Sound files open in their own tab with a play button, a
+  bar you can click or drag to seek, and speeds of 0.5, 1, 1.25, 1.5 and 2×.
+  It drives whatever player the machine has — ffplay, mpv, afplay, sox, cvlc,
+  paplay, aplay — pausing with a signal and seeking by restarting, and it
+  trims a temporary copy for players that cannot seek by themselves. All of it
+  lives in `tide/audio/`, is imported the first time it is needed, repaints
+  only while something is playing, and can be turned off completely with the
+  **Audio playback** setting.
+- The tabs in the modern appearance have a blank row under them and sit a
+  column in from the border, so they read as labels rather than as the first
+  line of the file.
+
+## 0.1.3 — 2026-08-28
 
 - **Appearance**, a new global setting with two values. `classic` is what
   there has always been, untouched. `modern` draws every pane as a floating

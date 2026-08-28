@@ -126,6 +126,25 @@ Requires Python 3.7+ and a terminal that speaks xterm mouse reporting
   into view. Editor tabs and terminal tabs scroll independently.
 - Indent style (tabs vs spaces, width) is detected per file.
 
+**Audio**
+- A `.wav`, `.mp3`, `.m4a`, `.flac`, `.ogg` or `.aiff` file opens in a tab of
+  its own — no question first, no binary dump — with a play button, a bar you
+  can click or drag to go anywhere in the file, and a speed button cycling
+  0.5, 1, 1.25, 1.5 and 2×. `space` plays and pauses, `←`/`→` move five
+  seconds, `s` changes speed. Nothing about it can be edited.
+- It plays through whatever the machine already has, best first: `ffplay`,
+  `mpv`, `afplay` (on every Mac), `sox`, `cvlc`, then the plain
+  `paplay`/`pw-play`/`aplay`. Pausing is a `SIGSTOP` to that process; seeking
+  restarts it at the new offset. Where the player cannot seek — `afplay`
+  cannot — a trimmed temporary copy stands in for the formats the standard
+  library can rewrite, so a `.wav` seeks on a bare Mac and an `.mp3` asks you
+  to install ffmpeg.
+- It costs nothing when you are not using it: the module is imported the first
+  time an audio file is opened, the screen only repaints while something is
+  actually playing, and the **Audio playback** setting turns the whole thing
+  off — with it off, a sound file is just another binary and no line of this
+  code runs.
+
 **Settings**
 - `f9`, `ctrl+t`, `alt+,`, or a click on **settings** in the top right — any of
   them open the settings panel: theme, auto-save and its delay,
@@ -354,7 +373,7 @@ running whether or not they are on screen.
 ## Tests
 
 ```sh
-python3 tests/run_all.py       # 596 tests, ~5 min
+python3 tests/run_all.py       # 631 tests, ~5 min
 python3 tests/test_units.py    # editing core, instant
 python3 tests/test_saving.py   # what lands on disk, instant
 python3 tests/test_durability.py   # quick exits, signals, lost terminals
@@ -368,6 +387,7 @@ python3 tests/test_panes.py    # dividers, tree scrolling, the sideways bar
 python3 tests/test_names.py    # what tabs are called, and cropping
 python3 tests/test_review.py   # the git review page
 python3 tests/test_appearance.py   # classic panes and modern boxes
+python3 tests/test_audio.py    # the player, the tab, and the setting
 python3 tests/test_update.py   # tide --update, including from inside tide
 ```
 
@@ -437,7 +457,7 @@ Deliberate differences, each with a test that says so:
 
 ## Known limits
 
-- No LSP, no git integration, no word wrap, no multi-cursor, no split editors
+- No LSP, no word wrap, no multi-cursor
   (the main area shows one thing at a time: the editor or a terminal).
 - Very long single lines scroll horizontally rather than wrapping.
 - Mixed line endings in one file are normalised on save (CRLF wins if the file

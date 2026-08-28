@@ -1,3 +1,3 @@
 """terminal_ide - a small terminal IDE (editor + file tree + built-in shell)."""
 
-__version__ = '0.1.3'
+__version__ = '0.1.4'

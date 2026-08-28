@@ -178,6 +178,10 @@ class App(object):
             # pipes, sockets and device nodes: reading one would hang us
             self.status('%s is not a regular file' % os.path.basename(path))
             return None
+        if self.settings.get('audio', True):
+            from . import audio                 # a set literal, nothing more
+            if audio.is_audio(path):
+                return self.open_audio(path)
         if not force:
             reason = self._open_guard(path)
             if reason:
@@ -231,6 +235,36 @@ class App(object):
             self.status('Opened %s' % self.rel(path))
         return ed
 
+    def open_audio(self, path):
+        """An audio file gets a tab of its own, with a play button in it."""
+        from . import audio
+        real = os.path.realpath(path)
+        for i, tab in enumerate(self.editors):
+            if getattr(tab, 'is_audio', False) and \
+                    os.path.realpath(tab.path) == real:
+                self.active, self.focus = i, 'editor'
+                self.main_view = 'editor'
+                self.need_render = True
+                return tab
+        try:
+            view = audio.open_view(self, path)
+        except Exception as exc:               # never let this break opening
+            self.status('Cannot play %s: %s' % (os.path.basename(path), exc))
+            return None
+        cur = self.editor
+        if (cur and cur.path is None and not cur.doc.dirty
+                and cur.doc.text() == '' and len(self.editors) == 1):
+            self.editors[0] = view             # replace a pristine untitled tab
+            self.active = 0
+        else:
+            self.editors.append(view)
+            self.active = len(self.editors) - 1
+        self.focus = 'editor'
+        self.main_view = 'editor'
+        self.need_render = True
+        self.status('Opened %s' % self.rel(path))
+        return view
+
     def rel(self, path):
         """A path relative to the project, for showing in the status bar."""
         if not path:
@@ -270,6 +304,9 @@ class App(object):
         self._remove_tab(index)
 
     def _remove_tab(self, index):
+        closing = self.editors[index]
+        if hasattr(closing, 'close'):
+            closing.close()                    # an audio tab lets go of its player
         del self.editors[index]
         if not self.editors:
             self.new_file()
@@ -280,6 +317,9 @@ class App(object):
     def save(self, ed=None, path=None, force=False):
         ed = ed or self.editor
         if ed is None:
+            return False
+        if getattr(ed, 'is_audio', False):
+            self.status('%s is a sound file, not text' % ed.title)
             return False
         if ed.is_diff:
             self.status('%s is a read-only diff' % ed.title)
@@ -632,7 +672,9 @@ class App(object):
     def text_editor(self):
         """The active tab if it is a real editor, else None."""
         ed = self.editor
-        return None if ed is None or ed.is_diff else ed
+        if ed is None or ed.is_diff or getattr(ed, 'is_audio', False):
+            return None
+        return ed
 
     def open_diff(self, view):
         self.adopt(view)
@@ -711,6 +753,12 @@ class App(object):
             if found and found != panel.program:
                 panel.program = found
                 self.need_render = True
+
+    def _audio_busy(self):
+        """Whether the tab on screen is playing something and wants repainting."""
+        view = self.editor
+        return bool(getattr(view, 'is_audio', False) and self.main_view == 'editor'
+                    and view.busy())
 
     def _sideways_bar_showing(self):
         """Whether the pane on screen is drawing its sideways scrollbar."""
@@ -1120,6 +1168,8 @@ class App(object):
             left = self.message
         elif self.main_is_terminal():
             left = self.big_term().tab_title()
+        elif ed is not None and getattr(ed, 'is_audio', False):
+            left = ed.title
         elif ed is not None and ed.is_diff:
             left = ed.title
         elif ed:
@@ -1127,7 +1177,12 @@ class App(object):
         scr.put(x0, rect.y, left, fg=theme.STATUS_FG, bg=theme.STATUS_BG,
                 max_x=rect.x2 - 40)
         right = ''
-        if ed is not None and ed.is_diff:
+        if ed is not None and getattr(ed, 'is_audio', False):
+            player = ed.player
+            state = 'playing' if player.playing else (
+                'paused' if player.paused else 'stopped')
+            right = '%s  %g×  read-only' % (state, player.rate)
+        elif ed is not None and ed.is_diff:
             swap = ('  r: %s' % ed.alt_left.label) if ed.alt_left else ''
             right = '%d changes  %s  read-only  m: %s%s' % (
                 ed.changes, 'changes only' if ed.minimal else 'whole file',
@@ -1712,6 +1767,9 @@ class App(object):
             self.terminal.stop()
             for term in self.big_terms:
                 term.stop()
+            for tab in self.editors:
+                if hasattr(tab, 'close'):
+                    tab.close()          # no sound outlives the editor
 
     def tick(self, timeout=0.2):
         if self.resized:
@@ -1770,6 +1828,8 @@ class App(object):
                     self.handle_paste(ev)
                 if not self.running:
                     break
+        if self._audio_busy():
+            self.need_render = True
         self.autosave_tick()
         self.refresh_terminal_titles()
         self.check_disk_changes()

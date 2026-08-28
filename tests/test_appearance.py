@@ -197,6 +197,16 @@ class TestModernBoxes(LookTest):
         self.assertTrue(box.contains(tabs.x, tabs.y), 'the tabs are outside')
         self.assertIn('app.py', self.screen(app))
 
+    def test_the_tabs_have_room_to_breathe(self):
+        app = self.app('modern', 'forest')
+        box, tabs, editor = (app.rects['editor_box'], app.rects['tabs'],
+                             app.rects['editor'])
+        self.assertGreater(tabs.x, box.x + 1, 'the tabs sit on the border')
+        self.assertEqual(editor.y, tabs.y + 2, 'no blank row under the tabs')
+        blank = ''.join(c[0] or ' ' for c in app.screen.cells[tabs.y + 1]
+                        [box.x + 1:box.x2 - 1])
+        self.assertEqual(blank.strip(), '', 'the row under the tabs is not clear')
+
     def test_the_contents_are_the_same_as_ever(self):
         app = self.app('modern', 'forest')
         painted = self.screen(app)

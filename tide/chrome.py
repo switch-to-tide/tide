@@ -87,9 +87,16 @@ def arrange(rects):
 
 
 def _split_tabs(area):
-    """The first row inside a box is its tab strip; the rest is the pane."""
-    return (Rect(area.x, area.y, area.w, 1),
-            Rect(area.x, area.y + 1, area.w, max(1, area.h - 1)))
+    """The first row inside a box is its tab strip; the rest is the pane.
+
+    A blank row between them, and a column of inset, so the tabs read as
+    labels on the box rather than as the first line of the text.
+    """
+    if area.h < 4:
+        return (Rect(area.x, area.y, area.w, 1),
+                Rect(area.x, area.y + 1, area.w, max(1, area.h - 1)))
+    return (Rect(area.x + 1, area.y, max(1, area.w - 1), 1),
+            Rect(area.x, area.y + 2, area.w, area.h - 2))
 
 
 def grab_column(rects):

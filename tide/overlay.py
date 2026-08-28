@@ -438,6 +438,7 @@ HELP_TEXT = [
         ('red mark in the gutter', 'lines were removed here'),
         ('ticks on the scrollbar', 'where the changes are in the whole file'),
         ('f10, or review', 'every change in the working tree, in one page'),
+        ('audio files', 'open in a tab: space plays, ←/→ 5s, s speed'),
         ('  in the review', 'click a heading to fold a file, esc to leave'),
         ('grey names in the tree', 'files git is told to ignore'),
         ('branch name', 'bottom left, with * when there are changes'),
