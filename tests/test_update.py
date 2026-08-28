@@ -32,8 +32,13 @@ class UpdateTest(unittest.TestCase):
         cls.tmp = tempfile.mkdtemp(prefix='tide-update-')
         source = os.path.join(cls.tmp, 'source')
         os.makedirs(source)
+        # tracked files, plus anything new that is not ignored - otherwise a
+        # feature still in the working tree is missing from the copy
         tracked = subprocess.check_output(
             ['git', '-C', ROOT, 'ls-files']).decode().split()
+        tracked += subprocess.check_output(
+            ['git', '-C', ROOT, 'ls-files', '--others',
+             '--exclude-standard']).decode().split()
         for rel in tracked:
             target = os.path.join(source, rel)
             directory = os.path.dirname(target)

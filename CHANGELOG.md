@@ -6,7 +6,18 @@ Versions are tagged in git as `v0.1.0` and so on, and the installer takes one:
 curl -fsSL https://raw.githubusercontent.com/switch-to-tide/tide/main/install.sh | sh -s -- 0.1.0
 ```
 
-## 0.1.1 — unreleased
+## 0.1.2 — unreleased
+
+- **Git review** (`f10`, or the button in the top right): every change in the
+  working tree on one page — the changed files in their folders down the left,
+  and one long side-by-side diff scrolling from the first to the last with a
+  rule between them. Each file has a heading with a triangle you can click to
+  fold it away; added and deleted files start folded, and the settings say
+  which kinds start open. Read only, and it leaves everything behind it
+  exactly as it was: tabs, split view, and running shells all come back when
+  you press escape. Files that were only moved are left out.
+
+## 0.1.1 — 2026-08-28
 
 - Install a particular version: pass it to the installer, or set
   `TIDE_VERSION`. A branch or a commit works too; nothing at all still gets

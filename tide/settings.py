@@ -14,6 +14,9 @@ DEFAULTS = {
     'split_view': False,
     'show_tree': True,
     'tab_width': 4,
+    'review_open_modified': True,
+    'review_open_added': False,
+    'review_open_deleted': False,
 }
 
 # key, label, the values it cycles through
@@ -27,6 +30,9 @@ FIELDS = [
     ('split_view', 'Split view', [True, False]),
     ('show_tree', 'Explorer', [True, False]),
     ('tab_width', 'Indent width', [2, 4, 8]),
+    ('review_open_modified', 'Review: modified files', [True, False]),
+    ('review_open_added', 'Review: added files', [True, False]),
+    ('review_open_deleted', 'Review: deleted files', [True, False]),
 ]
 
 HINTS = {
@@ -39,6 +45,9 @@ HINTS = {
     'split_view': 'editor and terminal side by side',
     'show_tree': 'file explorer, at startup',
     'tab_width': 'when a file has none to copy',
+    'review_open_modified': 'open, or folded to one line',
+    'review_open_added': 'open, or folded to one line',
+    'review_open_deleted': 'open, or folded to one line',
 }
 
 

@@ -25,6 +25,7 @@ if __name__ == '__main__':
         loader.discover(HERE, pattern='test_chrome.py'),
         loader.discover(HERE, pattern='test_panes.py'),
         loader.discover(HERE, pattern='test_names.py'),
+        loader.discover(HERE, pattern='test_review.py'),
         loader.discover(HERE, pattern='test_update.py'),
         loader.discover(HERE, pattern='test_settings.py'),
         loader.discover(HERE, pattern='test_e2e.py'),

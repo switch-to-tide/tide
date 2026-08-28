@@ -15,6 +15,7 @@ from .filetree import FileTree, IGNORE_DIRS, IGNORE_FILES
 from .git import Git
 from . import names as tabnames
 from .keys import ALT, CTRL, SHIFT, Decoder, Key, Mouse, Paste
+from .review import Review
 from .overlay import Confirm, Help, Prompt, SettingsPanel
 from .term import BOLD, DIM, RawTerminal, Rect, Screen
 from .termpanel import TerminalPanel
@@ -62,6 +63,8 @@ class App(object):
         self.term_h_user_set = False
         self.sidebar_w = SIDEBAR_W
         self._tree_indicator = False
+        self.review = None           # the git review, when it is on screen
+        self._review_focus = None    # what had the keyboard before it opened
         self._pgid_names = {}        # foreground process group -> program name
         self._last_title_poll = 0.0
         self._hbar_showing = False
@@ -465,6 +468,8 @@ class App(object):
         self.need_render = True
 
     def apply_setting(self, key, value):
+        if key.startswith('review_') and self.review is not None:
+            self.review.reset_folds()      # show it the way it is now asked for
         if key == 'theme':
             theme.apply(value)
             self.screen.prev = None            # every cell changed
@@ -708,7 +713,7 @@ class App(object):
                          and not getattr(self.overlay, 'is_list', False)) else 0
         content_h = max(1, h - 1 - prompt_h)
         sw = 0
-        if self.show_tree and w > 50:
+        if (self.show_tree or self.review is not None) and w > 50:
             sw = min(self.sidebar_w, max(MIN_SIDEBAR_W, w - MIN_MAIN_W))
             sw = max(MIN_SIDEBAR_W, sw)
         rects = {'status': Rect(0, h - 1, w, 1),
@@ -726,7 +731,7 @@ class App(object):
             term_h = max(MIN_TERM_H, min(desired, max(MIN_TERM_H, body_h - 3)))
             term_h = max(0, min(term_h, body_h))
         editor_h = max(1, body_h - term_h)
-        if self.split_active(main_w):
+        if self.split_active(main_w) and self.review is None:
             left_w = (main_w - 1) // 2
             rects['editor'] = Rect(main_x, 2, left_w, editor_h)
             rects['divider'] = main_x + left_w
@@ -747,6 +752,8 @@ class App(object):
         r = self.layout()
         scr.clear(bg=theme.BG)
         cursor = None
+        if self.review is not None:
+            return self.render_review(scr, r)
         if r['sidebar']:
             self.tree.render(scr, r['sidebar'], self.focus == 'tree')
             self._tree_indicator = self.tree.indicator_showing()
@@ -781,6 +788,89 @@ class App(object):
         scr.flush(self.out, cursor)
         self.need_render = False
 
+    def render_review(self, scr, r):
+        """The review's own screen: changed files, one long diff, the shell."""
+        cursor = None
+        if r['sidebar']:
+            self.review.render_tree(scr, r['sidebar'], self.focus == 'tree')
+        self.render_review_bar(scr, r['switch'])
+        self.render_review_tab(scr, r['tabs'])
+        self.review.render(scr, r['editor'], self.focus == 'editor')
+        if r['terminal']:
+            c = self.terminal.render(scr, r['terminal'], self.focus == 'terminal')
+            if self.focus == 'terminal':
+                cursor = c
+        self.render_status(scr, r['status'])
+        if self.overlay is not None:
+            c = self.overlay.render(scr, r['overlay_area'])
+            if c:
+                cursor = c
+        scr.flush(self.out, cursor)
+        self.need_render = False
+
+    def render_review_bar(self, scr, rect):
+        """Where the view switch usually is: what this is, and the way out."""
+        scr.fill(rect.x, rect.y, rect.w, 1, bg=theme.PANEL)
+        label = '  GIT REVIEW  '
+        scr.fill(rect.x + 1, rect.y, min(len(label), rect.w - 1), 1,
+                 bg=theme.STATUS_ACC)
+        scr.put(rect.x + 1, rect.y, label, fg=theme.STATUS_FG, bg=theme.STATUS_ACC,
+                attr=BOLD, max_x=rect.x2)
+        branch = self.git.read_branch() or ''
+        if branch and rect.w > len(label) + len(branch) + 20:
+            scr.put(rect.x + len(label) + 3, rect.y, branch, fg=theme.FG_DIM,
+                    bg=theme.PANEL)
+        chip = '  x  '
+        cx = rect.x2 - len(chip)
+        self.review_close_span = (cx, rect.x2)
+        scr.fill(cx, rect.y, len(chip), 1, bg=theme.PANEL_ALT)
+        scr.put(cx, rect.y, chip, fg=theme.TAB_MARK, bg=theme.PANEL_ALT, attr=BOLD)
+        hint = 'esc leaves the review '
+        if cx - len(hint) > rect.x + len(label) + 4:
+            scr.put(cx - len(hint), rect.y, hint, fg=theme.FG_DIM, bg=theme.PANEL)
+
+    def render_review_tab(self, scr, rect):
+        """One tab, for the one thing being reviewed."""
+        scr.fill(rect.x, rect.y, rect.w, 1, bg=theme.TAB_BG)
+        self.tab_spans = []
+        self.tab_close_spans = []
+        self.tab_arrows = []
+        self.plus_span = None
+        count = self.review.count()
+        label = ' Review: %d file%s changed ' % (count, '' if count == 1 else 's')
+        scr.fill(rect.x, rect.y, min(len(label), rect.w), 1, bg=theme.TAB_ACTIVE_BG)
+        scr.put(rect.x, rect.y, label, fg=theme.TAB_ACTIVE_FG,
+                bg=theme.TAB_ACTIVE_BG, attr=BOLD, max_x=rect.x2)
+
+    def open_review(self):
+        """Show every change in the working tree, read only."""
+        if not self.git.enabled:
+            self.status('not a git repository')
+            return False
+        if self.review is not None:
+            return False
+        review = Review(self)
+        if not review.count():
+            self.status('nothing has changed since the last commit')
+            return False
+        self.review = review
+        self._review_focus = self.focus
+        if self.focus != 'terminal':
+            self.focus = 'editor'
+        self.need_render = True
+        return True
+
+    def close_review(self):
+        """Put back exactly what was on screen before."""
+        if self.review is None:
+            return False
+        self.review = None
+        if self._review_focus and self.focus != 'terminal':
+            self.focus = self._review_focus
+        self._review_focus = None
+        self.need_render = True
+        return True
+
     def render_switch(self, scr, rect):
         """The row above the tabs: what the main area is showing."""
         scr.fill(rect.x, rect.y, rect.w, 1, bg=theme.PANEL)
@@ -811,6 +901,17 @@ class App(object):
             scr.fill(cx, rect.y, len(chip), 1, bg=theme.PANEL_ALT)
             scr.put(cx, rect.y, chip, fg=theme.TAB_MARK, bg=theme.PANEL_ALT)
             self.settings_span = (cx, rect.x2)
+        # a way in to the git review, when there is a repository to review
+        self.review_span = None
+        if self.git.enabled:
+            label = ' review '
+            bx = cx - len(label)
+            if bx > x + 2:
+                scr.fill(bx, rect.y, len(label), 1, bg=theme.PANEL_ALT)
+                scr.put(bx, rect.y, label, fg=theme.GIT_LINE_ADDED,
+                        bg=theme.PANEL_ALT)
+                self.review_span = (bx, bx + len(label))
+                cx = bx - 1
         # in split view with nothing to split with, offer to start a shell
         self.new_term_span = None
         if self.split and not self.big_terms:
@@ -1180,6 +1281,12 @@ class App(object):
             self.overlay = Help()
             self.need_render = True
             return
+        if self.review is not None:
+            self.review_key(key, combo)
+            return
+        if combo == 'f10':
+            self.open_review()
+            return
         if combo in ('f6', 'shift+f6'):
             self.cycle_focus(back=key.shift)
             return
@@ -1306,6 +1413,9 @@ class App(object):
                 self.overlay = None
             return
         r = self.rects or self.layout()
+        if self.review is not None and not self.mouse_capture:
+            if self.review_mouse(ev, r):
+                return
         if self.mouse_capture and ev.kind in ('drag', 'release'):
             target = self.mouse_capture
             if ev.kind == 'release':
@@ -1400,12 +1510,68 @@ class App(object):
             main.on_mouse(ev)
             return
 
+    def review_mouse(self, ev, r):
+        """Clicks while reviewing: the file list, the page, the way out."""
+        if r['terminal'] and r['terminal'].contains(ev.x, ev.y):
+            return False                       # the shell below is still live
+        if r['switch'].contains(ev.x, ev.y):
+            span = getattr(self, 'review_close_span', None)
+            if ev.kind == 'press' and span and span[0] <= ev.x < span[1]:
+                self.close_review()
+            return True
+        if r['sidebar'] and ev.x == r['sidebar'].x2 - 1 and ev.y < r['status'].y:
+            if ev.kind == 'press':             # the divider still resizes
+                self.mouse_capture = 'vsplitter'
+            return True
+        if r['sidebar'] and r['sidebar'].contains(ev.x, ev.y):
+            if ev.kind == 'press':
+                self.focus = 'tree'
+            self.review.on_tree_mouse(ev)
+            return True
+        if r['tabs'].contains(ev.x, ev.y):
+            return True                        # the one tab does nothing
+        if r['editor'].contains(ev.x, ev.y):
+            if ev.kind == 'press':
+                self.focus = 'editor'
+            self.review.on_mouse(ev)
+            return True
+        return True
+
+    def review_key(self, key, combo):
+        """While reviewing: scroll, pick a file, or leave. Nothing edits."""
+        if combo in ('escape', 'ctrl+w', 'f10'):
+            self.close_review()
+            return
+        if combo == 'ctrl+q':
+            self.quit()
+            return
+        if combo == 'ctrl+j':
+            self.toggle_terminal()
+            return
+        if combo in ('f6', 'shift+f6'):
+            self.cycle_focus(back=key.shift)
+            return
+        if self.focus == 'terminal':
+            self.terminal.on_key(key)
+            self.need_render = True
+            return
+        if self.focus == 'tree':
+            if self.review.on_tree_key(key):
+                self.need_render = True
+                return
+        if self.review.on_key(key):
+            self.need_render = True
+
     def _click_switch(self, ev):
         if self.settings_span and self.settings_span[0] <= ev.x < self.settings_span[1]:
             self.open_settings()
             return
         if self.new_term_span and self.new_term_span[0] <= ev.x < self.new_term_span[1]:
             self.new_big_terminal()
+            return
+        span = getattr(self, 'review_span', None)
+        if span and span[0] <= ev.x < span[1]:
+            self.open_review()
             return
         for x1, x2, minimal in self.diff_spans:
             if x1 <= ev.x < x2:
@@ -1585,6 +1751,8 @@ class App(object):
         self.check_disk_changes()
         self.refresh_git()
         self.refresh_diffs()
+        if self.review is not None and self.review.refresh():
+            self.need_render = True
         if self.show_term and self.terminal.shell and self.terminal.shell.exited:
             self.terminal.shell.poll()
         # a full-size session closes itself when its shell exits

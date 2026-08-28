@@ -129,7 +129,8 @@ Requires Python 3.7+ and a terminal that speaks xterm mouse reporting
 - `f9`, `ctrl+t`, `alt+,`, or a click on **settings** in the top right — any of
   them open the settings panel: theme, auto-save and its delay,
   the size and line limits that trigger the "open anyway?" question, whether
-  the terminal panel and explorer start visible, and the default indent width.
+  the terminal panel and explorer start visible, the default indent width, and
+  which kinds of file start open in the review.
   Arrow keys or a click change a value; it applies immediately.
 - Preferences are global and live in `~/.config/tide/settings.json`, so a theme
   you pick in one repository is there in every other one. Command line flags
@@ -219,6 +220,16 @@ Requires Python 3.7+ and a terminal that speaks xterm mouse reporting
   scrollbar, in proportion to where they fall in the file, so a long file shows
   its edits at a glance - and there are none when the file already fits.
 - Files git is told to ignore are greyed in the explorer and carry no status.
+- **Review** (`f10`, or the button in the top right) puts every change in the
+  working tree on one page, the way a commit reads on a forge: the files that
+  changed down the left in their folders, and one long side-by-side diff you
+  scroll from the first to the last, a rule between them. Each file has a
+  heading with a triangle — click it to fold that file away. Added and deleted
+  files start folded, and which kinds start open is in the settings.
+  It is read only, it takes over the screen without touching what is behind it
+  (your tabs, your split, your running shells all come back), the shell docked
+  at the bottom stays live while you read, and `esc` or the `x` leaves.
+  A file that was only moved, with nothing edited, is left out.
 - That is the whole of it, deliberately. Branches, staging, commits and pushing
   are things you already do in a shell — and there is one right there.
 
@@ -268,6 +279,7 @@ Press `f1` inside the app for this list.
 | `f9`, `ctrl+t`, `alt+,`, or click **settings** | settings panel |
 | `f5` | split view: file and terminal side by side |
 | `f7` / `f8` | diff a modified file: changes only / whole file |
+| `f10`, or **review** | the whole working tree, as one review page (`esc` leaves) |
 | `alt+left` `alt+right` | previous / next tab |
 | `ctrl+b` / `ctrl+j` | toggle explorer / bottom terminal panel |
 | `f2`, or the `Editor` / `Terminals` switch | switch the main area: editor <-> full-size terminal |
@@ -330,7 +342,7 @@ running whether or not they are on screen.
 ## Tests
 
 ```sh
-python3 tests/run_all.py       # 527 tests, ~4 min
+python3 tests/run_all.py       # 560 tests, ~5 min
 python3 tests/test_units.py    # editing core, instant
 python3 tests/test_saving.py   # what lands on disk, instant
 python3 tests/test_durability.py   # quick exits, signals, lost terminals
@@ -342,6 +354,7 @@ python3 tests/test_workflows.py    # whole sessions, and a no-silent-loss proper
 python3 tests/test_filesystem.py   # odd content, odd names, odd file types, failed writes
 python3 tests/test_panes.py    # dividers, tree scrolling, the sideways bar
 python3 tests/test_names.py    # what tabs are called, and cropping
+python3 tests/test_review.py   # the git review page
 python3 tests/test_update.py   # tide --update, including from inside tide
 ```
 

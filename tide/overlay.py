@@ -436,6 +436,8 @@ HELP_TEXT = [
         ('blue bar in the gutter', 'lines edited since the last commit'),
         ('red mark in the gutter', 'lines were removed here'),
         ('ticks on the scrollbar', 'where the changes are in the whole file'),
+        ('f10, or review', 'every change in the working tree, in one page'),
+        ('  in the review', 'click a heading to fold a file, esc to leave'),
         ('grey names in the tree', 'files git is told to ignore'),
         ('branch name', 'bottom left, with * when there are changes'),
         ('branches, commits, push', 'use the terminal - f2 or ctrl+j'),
