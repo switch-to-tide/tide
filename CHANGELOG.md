@@ -6,7 +6,14 @@ Versions are tagged in git as `v0.1.0` and so on, and the installer takes one:
 curl -fsSL https://raw.githubusercontent.com/switch-to-tide/tide/main/install.sh | sh -s -- 0.1.0
 ```
 
-## 0.1.10 — unreleased
+## 0.1.11 — unreleased
+
+- `tide --show-audio-pipe` prints how to connect the audio pipe to this
+  machine - the sink command, both ssh forms and the ssh config block - and
+  says whether a sink is answering right now. With audio off, or with no pipe
+  set up, it says that instead.
+
+## 0.1.10 — 2026-08-28
 
 - The panes remember their proportions: drag the explorer's edge or the
   terminal's bar and that is where they are the next time tide opens.

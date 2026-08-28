@@ -174,6 +174,8 @@ def main(argv=None):
                     help='ask before opening a file with more lines')
     ap.add_argument('--max-mb', type=float, default=None, metavar='MB',
                     help='ask before opening a file bigger than this')
+    ap.add_argument('--show-audio-pipe', action='store_true',
+                    help='print how to connect the audio pipe to this machine')
     ap.add_argument('--audio-sink', nargs='?', const='', metavar='PORT',
                     help='play what a tide over ssh sends here (see --help)')
     ap.add_argument('--audio-check', nargs='?', const='', metavar='FILE',
@@ -191,6 +193,10 @@ def main(argv=None):
 
     if args.update is not None:
         return update(args.update)
+    if args.show_audio_pipe:
+        from . import settings as settings_store
+        from .audio.remote import describe
+        return describe(settings_store.load(), sys.stdout)
     if args.audio_sink is not None:
         from .audio.remote import PORT, serve
         try:

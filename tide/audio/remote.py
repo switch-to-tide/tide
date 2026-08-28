@@ -493,5 +493,40 @@ class Sink(object):
             self.say('%s: gone' % conn.name)
 
 
+def describe(settings, out):
+    """What to run to hear this machine's sound where you are sitting."""
+    import socket
+    if not settings.get('audio'):
+        out.write('Audio playback is off. Turn it on in the settings (f9) and\n'
+                  'choose where the sound should come out.\n')
+        return 1
+    port = int(settings.get('audio_sink_port') or 0)
+    if not port:
+        out.write('No audio pipe is set up: sound plays on this machine.\n'
+                  'To hear it somewhere else, turn audio on again in the\n'
+                  'settings (f9) and choose the machine you are sitting at.\n')
+        return 1
+    try:
+        host = socket.gethostname().split('.')[0]
+    except Exception:
+        host = 'this-machine'
+    found, said = reachable(port, 1.0)
+    out.write('On the machine you are sitting at:\n\n')
+    out.write('    tide --audio-sink %d\n\n' % port)
+    out.write('and connect to here with the port carried back:\n\n')
+    out.write('    ssh -R %d:127.0.0.1:%d %s\n' % (port, port, host))
+    out.write('    ssh -R %d:127.0.0.1:%d you@%s\n\n' % (port, port, host))
+    out.write('or once and for all, in ~/.ssh/config on that machine:\n\n')
+    out.write('    Host %s\n        RemoteForward %d 127.0.0.1:%d\n\n'
+              % (host, port, port))
+    if found:
+        out.write('A sink is answering on port %d right now (%s).\n'
+                  % (port, said))
+        return 0
+    out.write('Nothing is answering on port %d at the moment: %s\n'
+              % (port, said))
+    return 1
+
+
 def serve(port=PORT, out=None, once=False):
     Sink(port, out).serve(once=once)

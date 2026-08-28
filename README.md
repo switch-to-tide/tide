@@ -162,6 +162,9 @@ Requires Python 3.7+ and a terminal that speaks xterm mouse reporting
 - `tide --audio-check song.mp3` says what will happen before you wonder why
   nothing did: what is installed, what was chosen, the exact command, whether
   it stayed alive, and what it said if it did not.
+- `tide --show-audio-pipe` prints the commands to connect the pipe to that
+  machine, and whether a sink is answering; with audio off or no pipe set up,
+  it says so.
 - One sound at a time: starting one file stops another, and several sound
   tabs can be open without treading on each other.
 - **Over ssh, to hear it where you are sitting**: run `tide --audio-sink` on
