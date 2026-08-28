@@ -62,7 +62,12 @@ class App(object):
         self._last_tree_refresh = 0.0
         self.term_h = DEFAULT_TERM_H
         self.term_h_user_set = False
-        self.sidebar_w = SIDEBAR_W
+        self.sidebar_w = max(MIN_SIDEBAR_W,
+                             int(self.settings.get('sidebar_width') or SIDEBAR_W))
+        kept = int(self.settings.get('terminal_height') or 0)
+        if kept >= MIN_TERM_H:
+            self.term_h = kept              # the height you last dragged it to
+            self.term_h_user_set = True
         self._tree_indicator = False
         self.review = None           # the git review, when it is on screen
         self._review_focus = None    # what had the keyboard before it opened
@@ -859,6 +864,17 @@ class App(object):
                 panel.program = found
                 self.need_render = True
 
+    def remember_panes(self):
+        """Keep the proportions you dragged the panes to, for next time."""
+        width = int(self.sidebar_w)
+        height = int(self.term_h) if self.term_h_user_set else 0
+        if (self.settings.get('sidebar_width') == width
+                and self.settings.get('terminal_height') == height):
+            return
+        self.settings['sidebar_width'] = width
+        self.settings['terminal_height'] = height
+        settings_store.save(self.settings)
+
     def hush_audio(self, keep=None):
         """One sound at a time: quieten every other audio tab.
 
@@ -1617,6 +1633,8 @@ class App(object):
             target = self.mouse_capture
             if ev.kind == 'release':
                 self.mouse_capture = None
+                if target in ('splitter', 'vsplitter'):
+                    self.remember_panes()
             if target == 'splitter':
                 if ev.kind == 'drag':
                     body_bottom = r['status'].y

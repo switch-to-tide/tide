@@ -982,10 +982,21 @@ class TestTurningItOn(unittest.TestCase):
         from tide import settings as store
         return store.load()['audio']
 
+    def turn_on(self, app, where='l'):
+        """Ask for sound, and answer the where-should-it-come-out panel."""
+        from tide.audio.setup import AudioSetup
+        app.set_setting('audio', True)
+        if isinstance(app.overlay, AudioSetup):
+            panel = app.overlay
+            panel.on_key(Key('char', where))
+            if app.overlay is panel and where == 'l':
+                app.overlay = None
+        return app.overlay
+
     # -- nothing installed
     def test_with_nothing_installed_it_refuses_and_says_what_to_get(self):
         app = self.app()
-        app.set_setting('audio', True)
+        self.turn_on(app)
         self.assertFalse(app.settings['audio'])
         self.assertFalse(self.stored())
         self.assertIsNone(app.overlay, 'it asked a question it cannot honour')
@@ -995,7 +1006,7 @@ class TestTurningItOn(unittest.TestCase):
     def test_with_ffplay_it_just_turns_on(self):
         self.provide('ffplay')
         app = self.app()
-        app.set_setting('audio', True)
+        self.turn_on(app)
         self.assertTrue(app.settings['audio'])
         self.assertTrue(self.stored())
         self.assertIsNone(app.overlay, 'it asked when it did not need to')
@@ -1004,14 +1015,14 @@ class TestTurningItOn(unittest.TestCase):
     def test_mpv_counts_as_the_good_case_too(self):
         self.provide('mpv')
         app = self.app()
-        app.set_setting('audio', True)
+        self.turn_on(app)
         self.assertTrue(app.settings['audio'])
         self.assertIsNone(app.overlay)
 
     def test_ffmpeg_with_a_sink_counts_as_the_good_case(self):
         self.provide('ffmpeg', 'aplay')
         app = self.app()
-        app.set_setting('audio', True)
+        self.turn_on(app)
         self.assertTrue(app.settings['audio'])
         self.assertIsNone(app.overlay)
 
@@ -1019,7 +1030,7 @@ class TestTurningItOn(unittest.TestCase):
     def test_with_only_a_plain_player_it_asks_first(self):
         self.provide('afplay')
         app = self.app()
-        app.set_setting('audio', True)
+        self.turn_on(app)
         self.assertIsNotNone(app.overlay, 'it did not ask')
         self.assertFalse(app.settings['audio'], 'it turned on before being told')
         self.assertFalse(self.stored())
@@ -1029,7 +1040,7 @@ class TestTurningItOn(unittest.TestCase):
     def test_saying_you_will_install_it_leaves_it_off(self):
         self.provide('afplay')
         app = self.app()
-        app.set_setting('audio', True)
+        self.turn_on(app)
         app.overlay.on_no()
         self.assertFalse(app.settings['audio'])
         self.assertFalse(self.stored())
@@ -1038,7 +1049,7 @@ class TestTurningItOn(unittest.TestCase):
     def test_saying_use_it_anyway_turns_it_on(self):
         self.provide('afplay')
         app = self.app()
-        app.set_setting('audio', True)
+        self.turn_on(app)
         app.overlay.on_yes()
         self.assertTrue(app.settings['audio'])
         self.assertTrue(self.stored())
@@ -1047,7 +1058,7 @@ class TestTurningItOn(unittest.TestCase):
     def test_escaping_the_question_leaves_it_off(self):
         self.provide('afplay')
         app = self.app()
-        app.set_setting('audio', True)
+        self.turn_on(app)
         app.overlay.on_key(Key('escape'))
         self.assertFalse(app.settings['audio'])
         self.assertFalse(self.stored())
@@ -1057,7 +1068,7 @@ class TestTurningItOn(unittest.TestCase):
         self.provide('afplay')
         app = self.app()
         app.open_settings()
-        app.set_setting('audio', True)
+        self.turn_on(app)
         self.assertNotIsInstance(app.overlay, SettingsPanel)
         app.overlay.on_key(Key('char', char='y'))
         self.assertIsInstance(app.overlay, SettingsPanel,
@@ -1068,7 +1079,7 @@ class TestTurningItOn(unittest.TestCase):
     def test_turning_it_off_never_asks(self):
         self.provide('afplay')
         app = self.app()
-        app.set_setting('audio', True)
+        self.turn_on(app)
         app.overlay.on_yes()
         app.overlay = None
         app.set_setting('audio', False)
@@ -1112,7 +1123,7 @@ class TestTurningItOn(unittest.TestCase):
                 app.set_setting('audio', False)
                 want = False
             else:
-                app.set_setting('audio', True)
+                self.turn_on(app)
                 if app.overlay is not None:
                     if i % 2:
                         app.overlay.on_yes()
@@ -1134,7 +1145,7 @@ class TestTurningItOn(unittest.TestCase):
             self.provide(*tools)
             app = self.app()
             app.settings['audio'] = False
-            app.set_setting('audio', True)
+            self.turn_on(app)
             self.assertEqual(app.overlay is not None, asks,
                              'wrong question for %s' % (tools,))
             if app.overlay is not None:
@@ -1165,6 +1176,186 @@ class TestSurvey(unittest.TestCase):
             os.environ['PATH'] = was
             player_mod.forget()
             shutil.rmtree(folder, ignore_errors=True)
+
+
+class TestTheWherePanel(unittest.TestCase):
+    """The panel that asks where the sound should come out."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix='tide-where-')
+        self.cfg = tempfile.mkdtemp(prefix='tide-where-cfg-')
+        self.bin = tempfile.mkdtemp(prefix='tide-where-bin-')
+        os.environ['TIDE_CONFIG_HOME'] = self.cfg
+        self.was_path = os.environ.get('PATH', '')
+        os.environ['PATH'] = self.bin
+        player_mod.forget()
+        self.sink = None
+
+    def tearDown(self):
+        if self.sink is not None:
+            self.sink.stop()
+        os.environ['PATH'] = self.was_path
+        os.environ.pop('TIDE_CONFIG_HOME', None)
+        player_mod.forget()
+        for folder in (self.tmp, self.cfg, self.bin):
+            shutil.rmtree(folder, ignore_errors=True)
+
+    def app(self):
+        app = App(root=self.tmp, paths=[], out=io.StringIO())
+        app.screen = Screen(100, 26)
+        app.show_term = False
+        return app
+
+    def panel(self, app):
+        from tide.audio.setup import AudioSetup
+        app.set_setting('audio', True)
+        self.assertIsInstance(app.overlay, AudioSetup, 'no panel appeared')
+        return app.overlay
+
+    def painted(self, app, panel):
+        from tide.term import Rect
+        app.screen = Screen(100, 26)
+        panel.render(app.screen, Rect(0, 0, 100, 26))
+        return '\n'.join(''.join(c[0] or ' ' for c in row)
+                          for row in app.screen.cells)
+
+    def start_sink(self, port):
+        import threading
+        from tide.audio.remote import Sink
+        self.sink = _Sink(port)
+        self.sink.start()
+        for _ in range(50):
+            from tide.audio.remote import reachable
+            if reachable(port, 0.2)[0]:
+                return
+            time.sleep(0.05)
+        raise AssertionError('the test sink never came up')
+
+    # -- the choice itself
+    def test_it_offers_both_places(self):
+        panel = self.panel(self.app())
+        shown = self.painted(self.app(), panel)
+        self.assertIn('Where should the sound come out', shown)
+        self.assertIn('this machine', shown)
+        self.assertIn('sitting at', shown)
+
+    def test_local_is_exactly_what_it_always_was(self):
+        app = self.app()
+        panel = self.panel(app)
+        panel.on_key(Key('char', 'l'))
+        self.assertFalse(app.settings['audio'], 'nothing here can play')
+        self.assertIn('ffmpeg', app.message)
+        self.assertEqual(app.settings['audio_sink_port'], 0)
+
+    def test_escape_changes_nothing(self):
+        app = self.app()
+        panel = self.panel(app)
+        panel.on_key(Key('escape'))
+        self.assertFalse(app.settings['audio'])
+        self.assertEqual(app.settings['audio_sink_port'], 0)
+
+    # -- the ssh side
+    def test_the_ssh_step_says_what_to_run_and_both_ssh_lines(self):
+        app = self.app()
+        panel = self.panel(app)
+        panel.on_key(Key('char', 's'))
+        shown = self.painted(app, panel)
+        self.assertIn('tide --audio-sink', shown)
+        self.assertIn('you@this-machine', shown)
+        self.assertIn('already in your ssh config', shown,
+                      'no hint about the bare host name')
+        self.assertIn('RemoteForward', shown)
+        self.assertIn('port: 47000', shown)
+
+    def test_a_port_nothing_answers_on_leaves_it_off(self):
+        app = self.app()
+        panel = self.panel(app)
+        panel.on_key(Key('char', 's'))
+        panel.port = '47999'
+        panel.on_key(Key('enter'))
+        self.assertFalse(app.settings['audio'], 'it turned on with no sink')
+        self.assertEqual(app.settings['audio_sink_port'], 0)
+        self.assertIn('nothing answered', self.painted(app, panel))
+
+    def test_a_port_with_a_sink_on_it_turns_sound_on_and_is_remembered(self):
+        from tide import settings as store
+        port = 47311
+        self.start_sink(port)
+        app = self.app()
+        panel = self.panel(app)
+        panel.on_key(Key('char', 's'))
+        panel.port = ''
+        for digit in str(port):
+            panel.on_key(Key('char', digit))
+        panel.on_key(Key('enter'))
+        self.assertTrue(app.settings['audio'], 'it did not turn on')
+        self.assertEqual(app.settings['audio_sink_port'], port)
+        self.assertEqual(store.load()['audio_sink_port'], port,
+                         'the sink was not written down for next time')
+        self.assertTrue(store.load()['audio'])
+
+    def test_a_later_session_uses_the_sink_without_asking(self):
+        port = 47312
+        self.start_sink(port)
+        app = self.app()
+        panel = self.panel(app)
+        panel.on_key(Key('char', 's'))
+        panel.port = str(port)
+        panel.on_key(Key('enter'))
+        again = self.app()                      # as if tide were started afresh
+        self.assertTrue(again.settings['audio'])
+        tone = write_tone(os.path.join(self.tmp, 'tone.wav'), seconds=2)
+        view = again.open_file(tone)
+        from tide.audio.remote import Link
+        self.assertIsInstance(view.player, Link,
+                              'it went back to playing on this machine')
+        view.close()
+
+    def test_forgetting_the_sink(self):
+        port = 47313
+        self.start_sink(port)
+        app = self.app()
+        panel = self.panel(app)
+        panel.on_key(Key('char', 's'))
+        panel.port = str(port)
+        panel.on_key(Key('enter'))
+        panel = self.panel(app) if not app.settings['audio'] else None
+        app.settings['audio'] = False           # turn it on again to reach the panel
+        panel = self.panel(app)
+        panel.on_key(Key('char', 's'))
+        panel.on_key(Key('char', 'f'))
+        self.assertFalse(app.settings['audio'])
+        self.assertEqual(app.settings['audio_sink_port'], 0)
+
+
+class _Sink(object):
+    """The sink, on a thread, for the tests to talk to."""
+
+    def __init__(self, port):
+        self.port = port
+        self.thread = None
+        self.sink = None
+
+    def start(self):
+        import threading
+        from tide.audio.remote import Sink
+        self.sink = Sink(self.port)
+        self.thread = threading.Thread(target=self._run)
+        self.thread.daemon = True
+        self.thread.start()
+
+    def _run(self):
+        try:
+            self.sink.serve()
+        except Exception:
+            pass
+
+    def stop(self):
+        import socket
+        try:                                    # nudge it out of select()
+            socket.create_connection(('127.0.0.1', self.port), 0.2).close()
+        except Exception:
+            pass
 
 
 if __name__ == '__main__':

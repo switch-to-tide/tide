@@ -306,5 +306,75 @@ def _release(x, y):
     return _mouse('release', x, y)
 
 
+class TestSizesAreRemembered(PaneTest):
+    """What you drag the panes to is where they are next time."""
+
+    def app_with_terminal(self, cols=100, rows=30):
+        app = App(root=self.tmp, paths=[], out=io.StringIO())
+        app.screen = Screen(cols, rows)
+        app.show_term = True
+        app.render()
+        return app
+
+    def test_the_side_panel_width_survives_a_restart(self):
+        from tide import settings as store
+        self.files(4)
+        app = self.app()
+        edge = app.rects['sidebar'].x2 - 1
+        app.handle_mouse(_press(edge, 6))
+        app.handle_mouse(_drag(edge + 8, 6))
+        app.handle_mouse(_release(edge + 8, 6))
+        app.render()
+        width = app.rects['sidebar'].w
+        self.assertEqual(store.load()['sidebar_width'], app.sidebar_w)
+        again = self.app()
+        self.assertEqual(again.rects['sidebar'].w, width,
+                         'it forgot how wide the explorer was')
+
+    def test_the_terminal_height_survives_a_restart(self):
+        from tide import settings as store
+        self.files(3)
+        app = self.app_with_terminal()
+        row = app.rects['terminal'].y
+        app.handle_mouse(_press(50, row))
+        app.handle_mouse(_drag(50, row - 4))
+        app.handle_mouse(_release(50, row - 4))
+        app.render()
+        height = app.rects['terminal'].h
+        self.assertEqual(store.load()['terminal_height'], app.term_h)
+        again = self.app_with_terminal()
+        self.assertEqual(again.rects['terminal'].h, height,
+                         'it forgot how tall the terminal was')
+
+    def test_dragging_writes_it_down_once_and_only_when_it_moves(self):
+        from tide import settings as store
+        self.files(3)
+        app = self.app()
+        edge = app.rects['sidebar'].x2 - 1
+        app.handle_mouse(_press(edge, 6))
+        app.handle_mouse(_drag(edge + 5, 6))
+        app.handle_mouse(_release(edge + 5, 6))
+        first = store.load()['sidebar_width']
+        path = store.config_path()
+        before = os.path.getmtime(path)
+        time.sleep(0.05)
+        app.handle_mouse(_press(app.rects['sidebar'].x2 - 1, 6))
+        app.handle_mouse(_release(app.rects['sidebar'].x2 - 1, 6))
+        self.assertEqual(store.load()['sidebar_width'], first)
+        self.assertEqual(os.path.getmtime(path), before,
+                         'it wrote the settings again for nothing')
+
+    def test_a_nonsense_width_in_the_file_is_ignored(self):
+        from tide import settings as store
+        folder = os.path.dirname(store.config_path())
+        if not os.path.isdir(folder):
+            os.makedirs(folder)
+        with open(store.config_path(), 'w') as f:
+            f.write('{"sidebar_width": 2, "terminal_height": -9}')
+        app = self.app()
+        self.assertGreaterEqual(app.rects['sidebar'].w, MIN_SIDEBAR_W)
+        self.assertGreater(app.rects['editor'].w, 10)
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

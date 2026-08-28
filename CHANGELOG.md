@@ -6,7 +6,15 @@ Versions are tagged in git as `v0.1.0` and so on, and the installer takes one:
 curl -fsSL https://raw.githubusercontent.com/switch-to-tide/tide/main/install.sh | sh -s -- 0.1.0
 ```
 
-## 0.1.9 — unreleased
+## 0.1.10 — unreleased
+
+- The panes remember their proportions: drag the explorer's edge or the
+  terminal's bar and that is where they are the next time tide opens.
+- The ssh setup panel also shows the plain `ssh -R … host` form, for when the
+  host is already named in your ssh config and `you@host` is not what you
+  type.
+
+## 0.1.9 — 2026-08-28
 
 - **Two sound tabs no longer wedge the screen.** The sink served one
   conversation at a time, so a second tab asking to play waited behind the

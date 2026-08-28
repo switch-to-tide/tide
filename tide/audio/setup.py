@@ -162,6 +162,9 @@ class AudioSetup(object):
             ('', ''),
             ('command', 'ssh -R %s:127.0.0.1:%s  you@this-machine'
              % (self.port or PORT, self.port or PORT)),
+            ('dim', 'or, if that name is already in your ssh config, just:'),
+            ('command', 'ssh -R %s:127.0.0.1:%s  this-machine'
+             % (self.port or PORT, self.port or PORT)),
             ('', ''),
             ('dim', 'or once and for all, in ~/.ssh/config on that machine:'),
             ('command', 'Host this-machine'),

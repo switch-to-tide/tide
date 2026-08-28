@@ -326,7 +326,8 @@ Requires Python 3.7+ and a terminal that speaks xterm mouse reporting
   or cycle with `f6`; `ctrl+b` / `ctrl+j` show and hide the side and bottom panels.
 - Both dividers drag: the line down the right of the explorer resizes it, and
   the `TERMINAL` bar resizes the bottom panel. Neither pane can be dragged
-  away entirely.
+  away entirely, and where you leave them is where they are next time — the
+  proportions are kept with the rest of your settings.
 - The explorer has its own scrollbar, which appears down that divider while
   you scroll and fades once you stop; it stops at the last entry rather than
   scrolling into empty space. Folders open and close with `▸` / `▾`, and
@@ -410,7 +411,7 @@ running whether or not they are on screen.
 ## Tests
 
 ```sh
-python3 tests/run_all.py       # 701 tests, ~5 min
+python3 tests/run_all.py       # 713 tests, ~5 min
 python3 tests/test_units.py    # editing core, instant
 python3 tests/test_saving.py   # what lands on disk, instant
 python3 tests/test_durability.py   # quick exits, signals, lost terminals

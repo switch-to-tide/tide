@@ -17,6 +17,8 @@ DEFAULTS = {
     'tab_width': 4,
     'audio': False,
     'audio_sink_port': 0,
+    'sidebar_width': 26,
+    'terminal_height': 0,
     'review_open_modified': True,
     'review_open_added': False,
     'review_open_deleted': False,
@@ -84,6 +86,8 @@ def choices(key, values=None):
 # do have to be sane
 LIMITS = {
     'audio_sink_port': (0, 65535),
+    'sidebar_width': (8, 400),
+    'terminal_height': (0, 400),
     'autosave_delay': (0.1, 30.0),
     'max_lines': (100, 10000000),
     'max_mb': (0.01, 2000.0),
