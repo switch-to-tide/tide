@@ -36,6 +36,12 @@ curl -fsSL https://raw.githubusercontent.com/switch-to-tide/tide/main/install.sh
   attributed, and a player that stops well before the end is treated as a
   failure whatever its exit status - with whatever it said on the way out
   shown in the tab.
+- **`tide --update` works on a copy installed before the repository moved.**
+  It was fetching from a place that no longer exists and reporting that as a
+  missing version. It now says what git said, points the checkout at the right
+  place and tries once more, and lists the versions that do exist when the one
+  you asked for is not among them. `TIDE_REPO` names a fork or mirror to
+  follow instead.
 - `tide --audio-check [FILE]` prints what is installed, which player was
   chosen, the exact command, and what happened when it ran.
 - `ctrl+t` goes back to the tab you were on before, files among files and

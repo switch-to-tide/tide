@@ -114,10 +114,17 @@ class TestUpdating(UpdateTest):
         self.assertEqual(code, 0, out)
         self.assertEqual(self.installed(), '9.9.1', 'it did not go back')
 
+    def test_a_missing_version_does_not_move_the_remote(self):
+        before = git(self.install, 'remote', 'get-url', 'origin').strip()
+        self.update('4.5.6')
+        self.assertEqual(git(self.install, 'remote', 'get-url', 'origin').strip(),
+                         before, 'a missing version repointed the remote')
+
     def test_a_version_that_does_not_exist_changes_nothing(self):
         code, out = self.update('4.5.6')
         self.assertEqual(code, 1)
-        self.assertIn("no version '4.5.6'", out)
+        self.assertIn("could not fetch 'v4.5.6'", out)
+        self.assertIn('git said', out)
         self.assertEqual(self.installed(), '9.9.1', 'a failed update moved it')
 
     def test_it_always_says_to_reopen(self):
@@ -216,6 +223,51 @@ class TestUpdatingFromInside(UpdateTest):
         painted = self.screen()
         self.assertIn('print(1)', painted, 'could not open a file after the update')
         self.assertNotIn('Traceback', painted)
+
+
+class TestWhenTheRemoteIsWrong(UpdateTest):
+    """The commonest way an update fails: it is following the wrong place."""
+
+    def setUp(self):
+        UpdateTest.setUp(self)
+        os.environ['TIDE_REPO'] = self.remote      # 'where tide comes from'
+
+    def tearDown(self):
+        os.environ.pop('TIDE_REPO', None)
+
+    def test_a_checkout_left_behind_by_the_old_repository_is_repaired(self):
+        git(self.install, 'remote', 'set-url', 'origin',
+            'https://github.com/somebody/gone.git')
+        code, out = self.update()
+        self.assertEqual(code, 0, out)
+        self.assertIn('was following', out)
+        self.assertEqual(git(self.install, 'remote', 'get-url', 'origin').strip(),
+                         self.remote)
+        self.assertEqual(self.installed(), '9.9.2', 'it did not update after all')
+
+    def test_a_remote_that_is_simply_gone_says_what_git_said(self):
+        os.environ['TIDE_REPO'] = os.path.join(self.tmp, 'not-a-repo')
+        git(self.install, 'remote', 'set-url', 'origin',
+            os.path.join(self.tmp, 'also-not-a-repo'))
+        code, out = self.update()
+        self.assertEqual(code, 1)
+        self.assertIn('could not fetch', out)
+        self.assertIn('git said', out, 'it swallowed the reason again')
+
+    def test_a_version_that_is_not_there_lists_the_ones_that_are(self):
+        code, out = self.update('4.5.6')
+        self.assertEqual(code, 1)
+        self.assertIn('could not fetch', out)
+        self.assertIn('versions there', out)
+        self.assertIn('9.9.1', out, 'it did not say what does exist')
+
+    def test_it_does_not_repoint_a_checkout_that_is_already_right(self):
+        before = git(self.install, 'remote', 'get-url', 'origin').strip()
+        code, out = self.update()
+        self.assertEqual(code, 0, out)
+        self.assertNotIn('was following', out, 'it moved a remote for no reason')
+        self.assertEqual(git(self.install, 'remote', 'get-url', 'origin').strip(),
+                         before)
 
 
 if __name__ == '__main__':

@@ -46,6 +46,9 @@ tide --update            # the newest code
 tide --update 0.1.0      # or a particular version, back or forward
 ```
 
+`TIDE_REPO` follows a fork or a mirror instead of the usual repository, and a
+checkout still pointing at an older home is repaired the first time it fails.
+
 Re-running the curl command does the same thing. A tide that is already open
 keeps the version it started with — open a new one to use what you just
 pulled. To remove it:
@@ -398,7 +401,7 @@ running whether or not they are on screen.
 ## Tests
 
 ```sh
-python3 tests/run_all.py       # 694 tests, ~5 min
+python3 tests/run_all.py       # 698 tests, ~5 min
 python3 tests/test_units.py    # editing core, instant
 python3 tests/test_saving.py   # what lands on disk, instant
 python3 tests/test_durability.py   # quick exits, signals, lost terminals

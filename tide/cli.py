@@ -26,6 +26,82 @@ def installed_version(root):
         return '?'
 
 
+HOME_REPO = 'github.com/switch-to-tide/tide'
+
+
+def home_url():
+    """Where tide comes from; TIDE_REPO points a fork or a mirror elsewhere."""
+    return os.environ.get('TIDE_REPO') or 'https://%s.git' % HOME_REPO
+
+
+def _git(root, args):
+    """Run git in the checkout: (exit code or None if git is missing, output)."""
+    try:
+        process = subprocess.Popen(['git', '-C', root] + args,
+                                   stdout=subprocess.PIPE,
+                                   stderr=subprocess.STDOUT)
+    except OSError:
+        return None, ''
+    out = process.communicate()[0].decode('utf-8', 'replace')
+    return process.returncode, out
+
+
+def _tags(root):
+    """Which versions the remote is offering, for when one is asked for wrongly."""
+    code, out = _git(root, ['ls-remote', '--tags', '--refs', 'origin'])
+    if code:
+        return []
+    names = [line.rsplit('/', 1)[-1].lstrip('v') for line in out.splitlines()
+             if '/tags/' in line]
+    return sorted(set(names))[-6:]
+
+
+def _ref_missing(said):
+    """Whether git reached the remote and simply did not find that version.
+
+    Then there is nothing wrong with where we are fetching from, and moving
+    the remote would be the wrong thing to do.
+    """
+    low = (said or '').lower()
+    return ("couldn't find remote ref" in low or 'unknown revision' in low
+            or 'not our ref' in low)
+
+
+def _say(message):
+    """One stream, in order: the two are interleaved unpredictably in a pipe."""
+    sys.stdout.flush()
+    sys.stderr.write(message + '\n')
+    sys.stderr.flush()
+
+
+def _explain(root, origin, ref, said):
+    """Say what went wrong, rather than guessing that a version is missing."""
+    last = said.strip().splitlines()[-1] if said.strip() else ''
+    if (not _ref_missing(said) and origin
+            and HOME_REPO not in origin.replace(':', '/')
+            and origin != home_url()):
+        # an install from before the repository moved: it is fetching from
+        # somewhere that is not there any more. A version git looked for and
+        # did not find says nothing about where we are fetching from.
+        _say('This copy of tide is being updated from %s,\n'
+             'which is not where tide lives any more.\n\n'
+             'Point it at the right place:\n'
+             '    git -C %s remote set-url origin https://%s.git\n'
+             'or install it again:\n'
+             '    curl -fsSL https://raw.githubusercontent.com/'
+             'switch-to-tide/tide/main/install.sh | sh'
+             % (origin, root, HOME_REPO))
+        return
+    lines = ["tide could not fetch '%s' from %s." % (ref, origin or 'origin')]
+    if last:
+        lines.append('git said: %s' % last)
+    known = _tags(root)
+    if known:
+        lines.append('versions there: %s' % ', '.join(known))
+    lines.append('the checkout is %s' % root)
+    _say('\n'.join(lines))
+
+
 def update(version):
     """`tide --update`: move the clone to the newest code, or to a version."""
     root = checkout_root()
@@ -42,20 +118,32 @@ def update(version):
     else:
         ref = version
     was = installed_version(root)
-    steps = [['git', '-C', root, 'fetch', '-q', '--depth', '1', '--tags', 'origin', ref],
-             ['git', '-C', root, 'checkout', '-q', '--detach', 'FETCH_HEAD']]
-    for step in steps:
-        try:
-            code = subprocess.call(step, stderr=subprocess.DEVNULL)
-        except OSError:
-            sys.stderr.write('tide --update needs git on PATH.\n')
-            return 1
+    origin = (_git(root, ['remote', 'get-url', 'origin'])[1] or '').strip()
+    code, said = _git(root, ['fetch', '--depth', '1', '--tags', 'origin', ref])
+    if code is None:
+        sys.stderr.write('tide --update needs git on PATH.\n')
+        return 1
+    if code != 0:
+        # a checkout from before tide moved, or one using ssh without a key:
+        # point it at the canonical place and try once more before giving up
+        canonical = home_url()
+        following = origin
+        if origin != canonical and not _ref_missing(said):
+            _git(root, ['remote', 'set-url', 'origin', canonical])
+            _say('This copy was following %s.\nFollowing %s from now on.'
+                 % (origin or 'nowhere', canonical))
+            following = canonical
+            code, said = _git(root, ['fetch', '--depth', '1', '--tags',
+                                     'origin', ref])
         if code != 0:
-            if step is steps[0]:
-                sys.stderr.write("tide has no version '%s'.\n" % (version or ref))
-            else:
-                sys.stderr.write('%s has changes of its own; leaving it alone.\n' % root)
+            _explain(root, following, ref, said)
             return 1
+    code, said = _git(root, ['checkout', '-q', '--detach', 'FETCH_HEAD'])
+    if code != 0:
+        sys.stderr.write('%s has changes of its own; leaving it alone.\n' % root)
+        if said.strip():
+            sys.stderr.write('git said: %s\n' % said.strip().splitlines()[-1])
+        return 1
     now = installed_version(root)
     if now == was:
         sys.stdout.write('tide %s is already what you have.\n' % now)
