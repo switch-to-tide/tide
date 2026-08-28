@@ -521,7 +521,10 @@ class Review(object):
             selected = idx == self.index
             bg = theme.TREE_SEL_BG if (selected and focused) else (
                 theme.PANEL_ALT if selected else theme.PANEL)
-            screen.fill(rect.x, y, rect.w, 1, bg=bg)
+            # stop short of the divider we draw ourselves, so a
+            # highlighted row does not run through the line
+            screen.fill(rect.x, y, rect.w if theme.BOXED else edge - rect.x,
+                        1, bg=bg)
             fg = theme.TREE_DIR if node.is_dir else theme.git_colour(node.letter)
             mark = '▾ ' if node.is_dir else '  '
             room = max(1, edge - 1 - rect.x - node.depth - 1 - len(mark) -

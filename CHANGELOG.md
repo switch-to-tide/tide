@@ -6,7 +6,14 @@ Versions are tagged in git as `v0.1.0` and so on, and the installer takes one:
 curl -fsSL https://raw.githubusercontent.com/switch-to-tide/tide/main/install.sh | sh -s -- 0.1.0
 ```
 
-## 0.1.16 — unreleased
+## 0.1.17 — unreleased
+
+- In the classic appearance a highlighted row in the explorer ran through the
+  vertical line at its edge, since the row was being filled across the column
+  the line is drawn in. The row now stops one column short, and the line keeps
+  the panel behind it.
+
+## 0.1.16 — 2026-08-28
 
 - The shells sit a column in from the edge of their pane, both the docked one
   and the full-size ones: a prompt hard against the border read as a mistake.
