@@ -253,9 +253,10 @@ class FileTree(object):
         """The divider you drag to resize, doubling as the scroll indicator."""
         if edge <= rect.x:
             return
-        for y in range(rect.y, rect.y2):
-            behind = screen.cells[y][edge][2]
-            screen.put(edge, y, '\u2502', fg=theme.BORDER, bg=behind)
+        if not theme.BOXED:            # a boxed pane already has an edge
+            for y in range(rect.y, rect.y2):
+                behind = screen.cells[y][edge][2]
+                screen.put(edge, y, '\u2502', fg=theme.BORDER, bg=behind)
         total = len(self.entries)
         if not self.indicator_showing():
             return

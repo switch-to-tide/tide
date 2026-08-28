@@ -496,9 +496,10 @@ class Review(object):
                     screen.put(gx, y, '│', fg=theme.TREE_GUIDE, bg=bg)
             if node.letter and not node.is_dir:
                 screen.put(edge - 1, y, node.letter, fg=fg, bg=bg, attr=BOLD)
-        for y in range(rect.y, rect.y2):
-            behind = screen.cells[y][edge][2]
-            screen.put(edge, y, '│', fg=theme.BORDER, bg=behind)
+        if not theme.BOXED:            # a boxed pane already has an edge
+            for y in range(rect.y, rect.y2):
+                behind = screen.cells[y][edge][2]
+                screen.put(edge, y, '│', fg=theme.BORDER, bg=behind)
 
     def render(self, screen, rect, focused):
         self.rect = rect

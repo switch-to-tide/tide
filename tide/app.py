@@ -13,6 +13,7 @@ from .editor import Editor
 from .diff import DiffView, buffer_source, disk_source, head_source, rev_source
 from .filetree import FileTree, IGNORE_DIRS, IGNORE_FILES
 from .git import Git
+from . import chrome
 from . import names as tabnames
 from .keys import ALT, CTRL, SHIFT, Decoder, Key, Mouse, Paste
 from .review import Review
@@ -32,7 +33,7 @@ class App(object):
     def __init__(self, root='.', paths=(), out=None, in_fd=None):
         self.root = os.path.abspath(root)
         self.settings = settings_store.load()
-        theme.apply(self.settings['theme'])
+        theme.apply(self.settings['theme'], self.settings.get('appearance'))
         self.out = out or sys.stdout
         self.in_fd = in_fd if in_fd is not None else sys.stdin.fileno()
         self.editors = []
@@ -470,8 +471,18 @@ class App(object):
     def apply_setting(self, key, value):
         if key.startswith('review_') and self.review is not None:
             self.review.reset_folds()      # show it the way it is now asked for
+        if key == 'appearance':
+            # each appearance has its own four palettes; keep the name if it
+            # exists in the new set, otherwise fall back to its first
+            name = theme.apply(self.settings.get('theme'), value)
+            if name != self.settings.get('theme'):
+                self.settings['theme'] = name
+                settings_store.save(self.settings)
+            self.screen.prev = None
+            self.need_render = True
+            return
         if key == 'theme':
-            theme.apply(value)
+            theme.apply(value, self.settings.get('appearance'))
             self.screen.prev = None            # every cell changed
         elif key == 'autosave':
             self.autosave = value
@@ -743,6 +754,7 @@ class App(object):
             rects['split'] = None
         rects['terminal'] = Rect(main_x, 2 + editor_h, main_w, term_h) if term_h else None
         rects['overlay_area'] = Rect(0, 0, w, h - 1)
+        rects = chrome.arrange(rects)
         self.rects = rects
         return rects
 
@@ -755,6 +767,7 @@ class App(object):
         if self.review is not None:
             return self.render_review(scr, r)
         if r['sidebar']:
+            chrome.frame(scr, r.get('sidebar_box'), self.focus == 'tree')
             self.tree.render(scr, r['sidebar'], self.focus == 'tree')
             self._tree_indicator = self.tree.indicator_showing()
         self._hbar_showing = self._sideways_bar_showing()
@@ -763,6 +776,10 @@ class App(object):
         if r['split'] is not None:
             left, right = self.editor, self.big_term()
             focused = self.focus == 'editor'
+            chrome.frame(scr, r.get('editor_box'),
+                         focused and self.main_view == 'editor')
+            chrome.frame(scr, r.get('split_box'),
+                         focused and self.main_view == 'terminal')
             c_left = left.render(scr, r['editor'],
                                  focused and self.main_view == 'editor') if left else None
             c_right = right.render(scr, r['split'],
@@ -771,12 +788,14 @@ class App(object):
             if focused:
                 cursor = c_right if self.main_view == 'terminal' else c_left
         else:
+            chrome.frame(scr, r.get('editor_box'), self.focus == 'editor')
             main = self.big_term() if self.main_is_terminal() else self.editor
             if main is not None:
                 c = main.render(scr, r['editor'], self.focus == 'editor')
                 if self.focus == 'editor':
                     cursor = c
         if r['terminal']:
+            chrome.frame(scr, r.get('terminal_box'), self.focus == 'terminal')
             c = self.terminal.render(scr, r['terminal'], self.focus == 'terminal')
             if self.focus == 'terminal':
                 cursor = c
@@ -792,11 +811,14 @@ class App(object):
         """The review's own screen: changed files, one long diff, the shell."""
         cursor = None
         if r['sidebar']:
+            chrome.frame(scr, r.get('sidebar_box'), self.focus == 'tree')
             self.review.render_tree(scr, r['sidebar'], self.focus == 'tree')
         self.render_review_bar(scr, r['switch'])
         self.render_review_tab(scr, r['tabs'])
+        chrome.frame(scr, r.get('editor_box'), self.focus == 'editor')
         self.review.render(scr, r['editor'], self.focus == 'editor')
         if r['terminal']:
+            chrome.frame(scr, r.get('terminal_box'), self.focus == 'terminal')
             c = self.terminal.render(scr, r['terminal'], self.focus == 'terminal')
             if self.focus == 'terminal':
                 cursor = c
@@ -891,53 +913,45 @@ class App(object):
                             attr=BOLD if active else 0, max_x=rect.x2)
                 self.toggle_spans.append((x, x + len(label), view))
                 x += len(label) + 1
-        # a clickable way in to the settings, for keyboards where f9 is awkward
-        chip = ' settings '
+        # the buttons, laid out right to left with the same gap between each
         self.settings_span = None
+        self.review_span = None
         self.new_term_span = None
         self.diff_spans = []
-        cx = rect.x2 - len(chip)
-        if cx > x + 2:
-            scr.fill(cx, rect.y, len(chip), 1, bg=theme.PANEL_ALT)
-            scr.put(cx, rect.y, chip, fg=theme.TAB_MARK, bg=theme.PANEL_ALT)
-            self.settings_span = (cx, rect.x2)
-        # a way in to the git review, when there is a repository to review
-        self.review_span = None
+        cx = rect.x2
+        cx, self.settings_span = self._chip(scr, rect, cx, x, ' settings ',
+                                            theme.TAB_MARK)
         if self.git.enabled:
-            label = ' review '
-            bx = cx - len(label)
-            if bx > x + 2:
-                scr.fill(bx, rect.y, len(label), 1, bg=theme.PANEL_ALT)
-                scr.put(bx, rect.y, label, fg=theme.GIT_LINE_ADDED,
-                        bg=theme.PANEL_ALT)
-                self.review_span = (bx, bx + len(label))
-                cx = bx - 1
+            cx, self.review_span = self._chip(scr, rect, cx, x, ' review ',
+                                              theme.GIT_LINE_ADDED)
         # in split view with nothing to split with, offer to start a shell
-        self.new_term_span = None
         if self.split and not self.big_terms:
-            label = ' </> '
-            bx = cx - len(label)
-            if bx > x + 2:
-                scr.fill(bx, rect.y, len(label), 1, bg=theme.PANEL_ALT)
-                scr.put(bx, rect.y, label, fg=theme.OK, bg=theme.PANEL_ALT, attr=BOLD)
-                self.new_term_span = (bx, bx + len(label))
-                cx = bx - 1
+            cx, self.new_term_span = self._chip(scr, rect, cx, x, ' </> ',
+                                                theme.OK, bold=True)
         # diff buttons, when the file in front of us has committed changes
         ed = self.text_editor()
         if (ed is not None and ed.doc.path and self.git.enabled
                 and self.git.has_diff(ed.doc.path)):
             for label, minimal in ((' changes ', True), (' diff all ', False)):
-                bx = cx - len(label)
-                if bx <= x + 2:
+                cx, span = self._chip(scr, rect, cx, x, label,
+                                      theme.GIT_LINE_MODIFIED)
+                if span is None:
                     break
-                scr.fill(bx, rect.y, len(label), 1, bg=theme.PANEL_ALT)
-                scr.put(bx, rect.y, label, fg=theme.GIT_LINE_MODIFIED,
-                        bg=theme.PANEL_ALT)
-                self.diff_spans.append((bx, bx + len(label), minimal))
-                cx = bx - 1
+                self.diff_spans.append((span[0], span[1], minimal))
         hint = 'f2 switch  f5 split  '
         if cx - len(hint) > x + 2:
             scr.put(cx - len(hint), rect.y, hint, fg=theme.FG_DIM, bg=theme.PANEL)
+
+    @staticmethod
+    def _chip(scr, rect, cx, floor, label, fg, bold=False):
+        """One button in the top bar. Returns where the next one may end."""
+        bx = cx - len(label)
+        if bx <= floor + 1:            # do not crowd the view switch
+            return cx, None
+        scr.fill(bx, rect.y, len(label), 1, bg=theme.PANEL_ALT)
+        scr.put(bx, rect.y, label, fg=fg, bg=theme.PANEL_ALT,
+                attr=BOLD if bold else 0, max_x=rect.x2)
+        return bx - 1, (bx, bx + len(label))
 
     def render_tabs(self, scr, rect):
         """The tab row: one strip normally, one per half in split view."""
@@ -951,8 +965,9 @@ class App(object):
             self._render_strip(scr, Rect(rect.x, rect.y, divider - rect.x, 1), 'editor')
             self._render_strip(scr, Rect(divider + 1, rect.y, rect.x2 - divider - 1, 1),
                                'terminal')
-            scr.fill(divider, rect.y, 1, 1, bg=theme.PANEL)
-            scr.put(divider, rect.y, '|', fg=theme.BORDER, bg=theme.PANEL)
+            if not chrome.boxed():     # the boxes already keep them apart
+                scr.fill(divider, rect.y, 1, 1, bg=theme.PANEL)
+                scr.put(divider, rect.y, '|', fg=theme.BORDER, bg=theme.PANEL)
         else:
             self._render_strip(
                 scr, rect, 'terminal' if self.main_is_terminal() else 'editor')
@@ -1452,6 +1467,13 @@ class App(object):
                 self.tree.on_mouse(ev)
                 return
             return
+        grab = chrome.grab_row(r)
+        if r['terminal'] and grab is not None and ev.y == grab \
+                and ev.x >= r['terminal'].x:
+            if ev.kind == 'press':
+                self.mouse_capture = 'splitter'
+                self.focus = 'terminal'
+            return
         if r['terminal'] and r['terminal'].contains(ev.x, ev.y):
             if ev.y == r['terminal'].y:  # header = splitter
                 if ev.kind == 'press':
@@ -1463,7 +1485,8 @@ class App(object):
                 self.mouse_capture = 'terminal'
             self.terminal.on_mouse(ev)
             return
-        if r['sidebar'] and ev.x == r['sidebar'].x2 - 1 and ev.y < r['status'].y:
+        if (r['sidebar'] and ev.x == chrome.grab_column(r)
+                and ev.y < r['status'].y):
             if ev.kind == 'press':       # the divider: drag it to resize
                 self.mouse_capture = 'vsplitter'
             return
@@ -1519,7 +1542,8 @@ class App(object):
             if ev.kind == 'press' and span and span[0] <= ev.x < span[1]:
                 self.close_review()
             return True
-        if r['sidebar'] and ev.x == r['sidebar'].x2 - 1 and ev.y < r['status'].y:
+        if (r['sidebar'] and ev.x == chrome.grab_column(r)
+                and ev.y < r['status'].y):
             if ev.kind == 'press':             # the divider still resizes
                 self.mouse_capture = 'vsplitter'
             return True

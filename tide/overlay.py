@@ -292,6 +292,7 @@ class SettingsPanel(object):
 
     def _cycle(self, delta):
         key, _label, options = settings_store.FIELDS[self.index]
+        options = settings_store.choices(key, self.app.settings) or options
         current = self.app.settings.get(key)
         try:
             i = options.index(current)
@@ -458,7 +459,7 @@ HELP_TEXT = [
         ('big or binary files', 'the IDE asks before opening them'),
     ]),
     ('Other', [
-        ('f9, ctrl+t, alt+,', 'settings (theme, auto-save, size limits)'),
+        ('f9, ctrl+t, alt+,', 'settings (appearance, theme, auto-save, limits)'),
         ('click "settings"', 'the same panel, top right'),
         ('f1', 'this help'),
         ('ctrl+q', 'quit'),

@@ -76,6 +76,7 @@ python3 main.py --autosave-delay 3    # wait 3s of quiet instead of 0.8
 python3 main.py --max-lines 2000      # ask before opening anything longer
 python3 main.py --max-mb 0.5          # ask before opening anything bigger
 python3 main.py --update              # pull the newest code and exit
+python3 main.py --appearance modern   # floating boxes for this session
 ```
 
 Requires Python 3.7+ and a terminal that speaks xterm mouse reporting
@@ -136,8 +137,19 @@ Requires Python 3.7+ and a terminal that speaks xterm mouse reporting
   you pick in one repository is there in every other one. Command line flags
   (`--theme`, `--max-lines`, …) override them for one session without changing
   the file.
-- Four themes: **dark** (the default), **midnight** (darker, cooler), **ember**
-  (warm), and **light**.
+- Two **appearances**, each with four palettes:
+  - **classic** — the panes flush against each other, as they have always
+    been: **dark** (the default), **midnight** (darker, cooler), **ember**
+    (warm), **light**.
+  - **modern** — the same layout with every pane drawn as a floating box:
+    a thin rounded border, a little air between them, and the tabs inside the
+    pane they belong to. Its palettes are **dark**, **alien** (very dark, with
+    the accents turned up), **forest** (very dark, green and slate) and
+    **light**.
+  Everything else is identical between the two: the same panes in the same
+  proportions, the same dividers to drag, split view, the review, all of it.
+  `--appearance modern` tries one for a session, and naming a palette that
+  only one appearance has brings that appearance with it (`--theme forest`).
 
 > `cmd+,` cannot reach a terminal program: macOS keeps it for the terminal's
 > own preferences, and nothing is sent to the app. On a Mac laptop `f9` may
@@ -342,7 +354,7 @@ running whether or not they are on screen.
 ## Tests
 
 ```sh
-python3 tests/run_all.py       # 560 tests, ~5 min
+python3 tests/run_all.py       # 596 tests, ~5 min
 python3 tests/test_units.py    # editing core, instant
 python3 tests/test_saving.py   # what lands on disk, instant
 python3 tests/test_durability.py   # quick exits, signals, lost terminals
@@ -355,6 +367,7 @@ python3 tests/test_filesystem.py   # odd content, odd names, odd file types, fai
 python3 tests/test_panes.py    # dividers, tree scrolling, the sideways bar
 python3 tests/test_names.py    # what tabs are called, and cropping
 python3 tests/test_review.py   # the git review page
+python3 tests/test_appearance.py   # classic panes and modern boxes
 python3 tests/test_update.py   # tide --update, including from inside tide
 ```
 

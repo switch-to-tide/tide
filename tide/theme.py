@@ -97,8 +97,104 @@ LIGHT = dict(
     TOK_LINK=18, TOK_EMPH=236, TOK_STRONG=236, TOK_TAG=26, TOK_INVALID=160,
 )
 
+# ------------------------------------------------------------------ modern
+# The modern appearance draws every pane as a floating box. Its palettes are
+# flatter for that reason: the panel and the editor share a background, and
+# the borders do the separating that block colour does in the classic ones.
+
+M_DARK = dict(
+    DARK,
+    BG=235, BG_ALT=236, PANEL=235, PANEL_ALT=235,
+    BORDER=240, BORDER_HL=39,
+    GUTTER_BG=235, SCROLL_TRACK=236, SCROLL_THUMB=240, SCROLL_THUMB_HL=248,
+    TAB_ACTIVE_BG=235, TAB_ACTIVE_FG=252, TAB_BG=235, TAB_FG=243,
+    STATUS_BG=235, STATUS_FG=250, STATUS_ACC=39,
+    TREE_SEL_BG=237, TERM_BG=235,
+)
+
+# "alien" - very dark, with the accents turned right up
+M_ALIEN = dict(
+    M_DARK,
+    BG=232, BG_ALT=233, PANEL=232, PANEL_ALT=232, TERM_BG=232,
+    FG=251, FG_DIM=243, BORDER=238, BORDER_HL=190,
+    GUTTER_BG=232, LINENO=239, LINENO_CUR=190,
+    SELECTION=54, FIND_MATCH=100, FIND_CUR=127,
+    SCROLL_TRACK=233, SCROLL_THUMB=239, SCROLL_THUMB_HL=190,
+    TAB_ACTIVE_BG=232, TAB_ACTIVE_FG=190, TAB_BG=232, TAB_FG=243, TAB_MARK=213,
+    STATUS_BG=232, STATUS_FG=190, STATUS_ACC=129,
+    TREE_DIR=141, TREE_GUIDE=236, TREE_FILE=250, TREE_SEL_BG=53,
+    ERROR=197, WARN=190, OK=118, GIT_IGNORED=238,
+    GIT_UNTRACKED=118, GIT_ADDED=118, GIT_MODIFIED=190, GIT_DELETED=197,
+    GIT_RENAMED=190, GIT_CONFLICT=201,
+    GIT_LINE_ADDED=118, GIT_LINE_MODIFIED=141, GIT_LINE_DELETED=197,
+    TOK_COMMENT=240, TOK_STRING=214, TOK_NUMBER=157,
+    TOK_KEYWORD=213, TOK_CONTROL=201, TOK_TYPE=87, TOK_FUNCTION=190,
+    TOK_BUILTIN=141, TOK_CONSTANT=213, TOK_OPERATOR=248, TOK_PUNCT=245,
+    TOK_PREPROC=201, TOK_ATTR=190, TOK_PROPERTY=87, TOK_HEADING=213,
+    TOK_LINK=87, TOK_TAG=213, TOK_INVALID=197,
+)
+
+# "forest" - the same darkness, calmed down: green, moss and slate
+M_FOREST = dict(
+    M_DARK,
+    BG=233, BG_ALT=234, PANEL=233, PANEL_ALT=233, TERM_BG=233,
+    FG=252, FG_DIM=245, BORDER=238, BORDER_HL=72,
+    GUTTER_BG=233, LINENO=239, LINENO_CUR=108,
+    SELECTION=23, FIND_MATCH=58, FIND_CUR=64,
+    SCROLL_TRACK=234, SCROLL_THUMB=239, SCROLL_THUMB_HL=108,
+    TAB_ACTIVE_BG=233, TAB_ACTIVE_FG=115, TAB_BG=233, TAB_FG=244, TAB_MARK=180,
+    STATUS_BG=233, STATUS_FG=115, STATUS_ACC=72,
+    TREE_DIR=109, TREE_GUIDE=236, TREE_FILE=250, TREE_SEL_BG=23,
+    ERROR=167, WARN=180, OK=108, GIT_IGNORED=238,
+    GIT_UNTRACKED=108, GIT_ADDED=108, GIT_MODIFIED=180, GIT_DELETED=167,
+    GIT_RENAMED=180, GIT_CONFLICT=175,
+    GIT_LINE_ADDED=108, GIT_LINE_MODIFIED=74, GIT_LINE_DELETED=167,
+    TOK_COMMENT=65, TOK_STRING=144, TOK_NUMBER=151,
+    TOK_KEYWORD=109, TOK_CONTROL=110, TOK_TYPE=115, TOK_FUNCTION=187,
+    TOK_BUILTIN=108, TOK_CONSTANT=109, TOK_OPERATOR=248, TOK_PUNCT=245,
+    TOK_PREPROC=110, TOK_ATTR=187, TOK_PROPERTY=115, TOK_HEADING=109,
+    TOK_LINK=110, TOK_TAG=109, TOK_INVALID=167,
+)
+
+M_LIGHT = dict(
+    LIGHT,
+    BG=255, BG_ALT=254, PANEL=255, PANEL_ALT=255, TERM_BG=255,
+    BORDER=250, BORDER_HL=32,
+    GUTTER_BG=255, SCROLL_TRACK=254, SCROLL_THUMB=249, SCROLL_THUMB_HL=240,
+    TAB_ACTIVE_BG=255, TAB_ACTIVE_FG=236, TAB_BG=255, TAB_FG=245,
+    STATUS_BG=255, STATUS_FG=238, STATUS_ACC=32,
+    TREE_SEL_BG=252,
+)
+
+APPEARANCES = {
+    'classic': {'dark': DARK, 'midnight': MIDNIGHT, 'ember': EMBER,
+                'light': LIGHT},
+    'modern': {'dark': M_DARK, 'alien': M_ALIEN, 'forest': M_FOREST,
+               'light': M_LIGHT},
+}
+
+# the panes are drawn as floating boxes in one appearance and flush in the
+# other; this is the only thing outside the palette that appearance changes
+BOXED = False
+appearance = 'classic'
+
 PALETTES = {'dark': DARK, 'midnight': MIDNIGHT, 'ember': EMBER, 'light': LIGHT}
 NAMES = ['dark', 'midnight', 'ember', 'light']
+
+
+def appearance_for(name, preferred=None):
+    """Which appearance offers this palette, preferring the one in use."""
+    if preferred and name in APPEARANCES.get(preferred, {}):
+        return preferred
+    for look, palettes in APPEARANCES.items():
+        if name in palettes:
+            return look
+    return preferred or 'classic'
+
+
+def names_for(look):
+    """The four palettes an appearance offers, in the order they are shown."""
+    return list(APPEARANCES.get(look, APPEARANCES['classic']).keys())
 
 # token kind -> (palette key, attribute bits); 1 = bold, 4 = underline
 _TOKENS = {
@@ -121,12 +217,25 @@ STATUS_COLOUR = {}
 LINE_COLOUR = {}
 
 
-def apply(name):
-    """Switch the live palette; returns the name actually applied."""
-    global current, TOKEN, STATUS_COLOUR, LINE_COLOUR
-    palette = PALETTES.get(name)
+def apply(name, look=None):
+    """Switch the live palette; returns the name actually applied.
+
+    `look` is the appearance - which set of four palettes to pick from, and
+    whether the panes are drawn as boxes. Everything else about drawing is the
+    same either way.
+    """
+    global current, appearance, BOXED, TOKEN, STATUS_COLOUR, LINE_COLOUR
+    if look is None:
+        look = appearance
+    if look not in APPEARANCES:
+        look = 'classic'
+    palettes = APPEARANCES[look]
+    palette = palettes.get(name)
     if palette is None:
-        name, palette = 'dark', DARK
+        name = names_for(look)[0]
+        palette = palettes[name]
+    appearance = look
+    BOXED = look == 'modern'
     current = name
     globals().update(palette)
     TOKEN = dict((kind, (palette[key], attr))

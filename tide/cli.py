@@ -86,8 +86,12 @@ def main(argv=None):
     ap.add_argument('--update', nargs='?', const='', metavar='VERSION',
                     help='update the installed copy, to the newest code or to '
                          'a version, and exit')
-    ap.add_argument('--theme', default=None, choices=['dark', 'midnight', 'ember', 'light'],
-                    help='colour theme for this session')
+    ap.add_argument('--appearance', default=None, choices=['classic', 'modern'],
+                    help='flush panes (classic) or floating boxes (modern)')
+    ap.add_argument('--theme', default=None,
+                    choices=sorted(set(theme.names_for('classic') +
+                                       theme.names_for('modern'))),
+                    help='colour palette for this session')
     args = ap.parse_args(argv)
 
     if args.update is not None:
@@ -121,8 +125,15 @@ def main(argv=None):
         app.max_file_lines = max(1, args.max_lines)
     if args.max_mb is not None:
         app.max_file_bytes = int(max(0.01, args.max_mb) * 1024 * 1024)
+    if args.appearance:
+        app.settings['appearance'] = args.appearance
+        theme.apply(app.settings.get('theme'), args.appearance)
     if args.theme:
-        theme.apply(args.theme)
+        # a palette only the other appearance has brings its appearance along
+        look = theme.appearance_for(args.theme, app.settings.get('appearance'))
+        app.settings['theme'] = args.theme
+        app.settings['appearance'] = look
+        theme.apply(args.theme, look)
     for f in files:
         app.open_file(f)
     try:

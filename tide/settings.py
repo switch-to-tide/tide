@@ -5,6 +5,7 @@ import json
 import os
 
 DEFAULTS = {
+    'appearance': 'classic',
     'theme': 'dark',
     'autosave': True,
     'autosave_delay': 0.8,
@@ -21,6 +22,7 @@ DEFAULTS = {
 
 # key, label, the values it cycles through
 FIELDS = [
+    ('appearance', 'Appearance', ['classic', 'modern']),
     ('theme', 'Theme', ['dark', 'midnight', 'ember', 'light']),
     ('autosave', 'Auto-save', [True, False]),
     ('autosave_delay', 'Auto-save after', [0.3, 0.5, 0.8, 1.0, 2.0, 5.0]),
@@ -36,6 +38,7 @@ FIELDS = [
 ]
 
 HINTS = {
+    'appearance': 'flush panes, or floating boxes',
     'theme': 'colours for the whole app',
     'autosave': 'save shortly after you type',
     'autosave_delay': 'seconds of quiet before saving',
@@ -59,6 +62,19 @@ def config_path():
 
 
 CHOICES = dict((key, options) for key, _label, options in FIELDS)
+
+
+def choices(key, values=None):
+    """What a field can be set to, given what everything else is set to.
+
+    Only the theme depends on anything: each appearance brings its own four
+    palettes, and nothing else about it changes.
+    """
+    if key == 'theme':
+        from . import theme as theme_mod
+        look = (values or {}).get('appearance', DEFAULTS['appearance'])
+        return theme_mod.names_for(look)
+    return CHOICES.get(key, [])
 
 # hand-edited values do not have to be one of the offered choices, but they
 # do have to be sane
@@ -85,7 +101,11 @@ def _coerce(key, value):
     except (TypeError, ValueError):
         return default
     if isinstance(default, str):
-        return value if value in CHOICES.get(key, [value]) else default
+        allowed = CHOICES.get(key, [value])
+        if key == 'theme':
+            allowed = choices('theme', {'appearance': 'classic'}) + \
+                choices('theme', {'appearance': 'modern'})
+        return value if value in allowed else default
     low, high = LIMITS.get(key, (None, None))
     if low is not None:
         value = max(low, min(high, value))

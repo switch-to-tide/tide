@@ -6,7 +6,20 @@ Versions are tagged in git as `v0.1.0` and so on, and the installer takes one:
 curl -fsSL https://raw.githubusercontent.com/switch-to-tide/tide/main/install.sh | sh -s -- 0.1.0
 ```
 
-## 0.1.2 — unreleased
+## 0.1.3 — unreleased
+
+- **Appearance**, a new global setting with two values. `classic` is what
+  there has always been, untouched. `modern` draws every pane as a floating
+  box — a thin rounded border, a little space between them, the tabs inside
+  the pane they belong to — and brings its own four palettes: dark, **alien**
+  (very dark, bright accents) and **forest** (very dark, green and slate),
+  and light. The layout, the dividers you drag, split view and the review all
+  work exactly as before; the appearance is a thin frame around them, not a
+  second implementation.
+- Every button in the top right is drawn the same way now, with the same gap
+  between them, instead of settings and review running together.
+
+## 0.1.2 — 2026-08-28
 
 - **Git review** (`f10`, or the button in the top right): every change in the
   working tree on one page — the changed files in their folders down the left,

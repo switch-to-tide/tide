@@ -237,6 +237,7 @@ class TestSettingsPanel(unittest.TestCase):
     def test_changing_the_theme_repaints_and_persists(self):
         before = self.s.cell(60, 4)[2]
         self.s.key(F9)
+        self.s.key(DOWN)                     # appearance -> theme
         self.s.key(RIGHT)                    # dark -> midnight
         self.s.key(ESC)
         self.s.pump(0.4)
@@ -245,6 +246,7 @@ class TestSettingsPanel(unittest.TestCase):
 
     def test_light_theme_really_is_light(self):
         self.s.key(F9)
+        self.s.key(DOWN)                     # appearance -> theme
         for _ in range(3):                   # dark -> midnight -> ember -> light
             self.s.key(RIGHT)
         self.s.key(ESC)
@@ -286,6 +288,7 @@ class TestSettingsPanel(unittest.TestCase):
 
     def test_settings_survive_a_restart(self):
         self.s.key(F9)
+        self.s.key(DOWN)                     # appearance -> theme
         self.s.key(RIGHT)                    # theme -> midnight
         self.s.key(ESC)
         self.s.pump(0.4)
