@@ -2,11 +2,68 @@
 
 import argparse
 import os
+import re
+import subprocess
 import sys
 
 from . import __version__
 from . import theme
 from .app import App
+
+
+def checkout_root():
+    """The clone tide is running from, if it is running from one."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return root if os.path.isdir(os.path.join(root, '.git')) else None
+
+
+def installed_version(root):
+    try:
+        with open(os.path.join(root, 'tide', '__init__.py')) as f:
+            found = re.search(r"__version__ = '([^']+)'", f.read())
+        return found.group(1) if found else '?'
+    except (IOError, OSError):
+        return '?'
+
+
+def update(version):
+    """`tide --update`: move the clone to the newest code, or to a version."""
+    root = checkout_root()
+    if root is None:
+        sys.stderr.write(
+            'tide was not installed from a clone, so there is nothing to pull.\n'
+            'If you installed it with pip, upgrade it the same way:\n'
+            '    pip install --upgrade "git+https://github.com/switch-to-tide/tide.git"\n')
+        return 1
+    if version in ('', None):
+        ref = 'main'
+    elif re.match(r'^\d', version):
+        ref = 'v' + version            # releases are tagged v0.1.0
+    else:
+        ref = version
+    was = installed_version(root)
+    steps = [['git', '-C', root, 'fetch', '-q', '--depth', '1', '--tags', 'origin', ref],
+             ['git', '-C', root, 'checkout', '-q', '--detach', 'FETCH_HEAD']]
+    for step in steps:
+        try:
+            code = subprocess.call(step, stderr=subprocess.DEVNULL)
+        except OSError:
+            sys.stderr.write('tide --update needs git on PATH.\n')
+            return 1
+        if code != 0:
+            if step is steps[0]:
+                sys.stderr.write("tide has no version '%s'.\n" % (version or ref))
+            else:
+                sys.stderr.write('%s has changes of its own; leaving it alone.\n' % root)
+            return 1
+    now = installed_version(root)
+    if now == was:
+        sys.stdout.write('tide %s is already what you have.\n' % now)
+    else:
+        sys.stdout.write('tide %s -> %s.\n' % (was, now))
+    sys.stdout.write('Any tide already running keeps the version it started with;\n'
+                     'open a new one to use this.\n')
+    return 0
 
 
 def main(argv=None):
@@ -26,9 +83,15 @@ def main(argv=None):
                     help='ask before opening a file with more lines')
     ap.add_argument('--max-mb', type=float, default=None, metavar='MB',
                     help='ask before opening a file bigger than this')
+    ap.add_argument('--update', nargs='?', const='', metavar='VERSION',
+                    help='update the installed copy, to the newest code or to '
+                         'a version, and exit')
     ap.add_argument('--theme', default=None, choices=['dark', 'midnight', 'ember', 'light'],
                     help='colour theme for this session')
     args = ap.parse_args(argv)
+
+    if args.update is not None:
+        return update(args.update)
 
     root = None
     files = []

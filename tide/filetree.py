@@ -1,6 +1,7 @@
 """Sidebar file explorer."""
 
 import os
+import time
 
 from . import theme
 from .term import BOLD, Rect
@@ -8,6 +9,8 @@ from .term import BOLD, Rect
 IGNORE_DIRS = {'.git', '__pycache__', 'node_modules', '.venv', 'venv', '.mypy_cache',
                '.pytest_cache', 'target', 'dist', 'build', '.idea', '.tide-tmp'}
 IGNORE_FILES = {'.DS_Store'}
+
+SCROLL_FADE = 1.6        # seconds the scroll indicator stays after you stop
 
 
 class Entry(object):
@@ -28,6 +31,7 @@ class FileTree(object):
         self.entries = []
         self.index = 0
         self.top = 0
+        self.scrolled_at = 0.0            # when the indicator last woke up
         self.rect = Rect(0, 0, 1, 1)
         self.refresh()
 
@@ -101,12 +105,34 @@ class FileTree(object):
         else:
             self.app.open_file(entry.path)
 
+    def rows(self):
+        """How many entries fit under the header."""
+        return max(1, self.rect.h - 1)
+
+    def max_top(self):
+        """Highest first-visible entry: the last screenful of the tree."""
+        return max(0, len(self.entries) - self.rows())
+
+    def scroll_to(self, top):
+        top = max(0, min(self.max_top(), top))
+        if top != self.top:
+            self.top = top
+            self.scrolled_at = time.time()
+            return True
+        return False
+
+    def indicator_showing(self):
+        return (len(self.entries) > self.rows() and
+                time.time() - self.scrolled_at < SCROLL_FADE)
+
     def _scroll_into_view(self):
-        h = max(1, self.rect.h - 1)
+        h = self.rows()
         if self.index < self.top:
-            self.top = self.index
+            self.scroll_to(self.index)
         elif self.index >= self.top + h:
-            self.top = self.index - h + 1
+            self.scroll_to(self.index - h + 1)
+        else:
+            self.scroll_to(self.top)          # the end may have moved
 
     def move(self, delta):
         if not self.entries:
@@ -155,10 +181,10 @@ class FileTree(object):
 
     def on_mouse(self, ev):
         if ev.kind == 'wheel_up':
-            self.top = max(0, self.top - 3)
+            self.scroll_to(self.top - 3)
             return True
         if ev.kind == 'wheel_down':
-            self.top = min(max(0, len(self.entries) - 1), self.top + 3)
+            self.scroll_to(self.top + 3)
             return True
         if ev.kind != 'press':
             return False
@@ -182,8 +208,9 @@ class FileTree(object):
         if avail > 3:
             screen.put(rect.x + len(head) + 1, rect.y, name[:avail], fg=theme.FG_DIM,
                        bg=theme.PANEL_ALT)
-        h = rect.h - 1
-        self.top = max(0, min(self.top, max(0, len(self.entries) - 1)))
+        h = self.rows()
+        self.top = max(0, min(self.top, self.max_top()))
+        edge = rect.x2 - 1                 # the divider, and the scroll indicator
         for i in range(h):
             idx = self.top + i
             if idx >= len(self.entries):
@@ -196,7 +223,7 @@ class FileTree(object):
             screen.fill(rect.x, y, rect.w, 1, bg=bg)
             prefix = ' ' * (e.depth + 1)
             if e.is_dir:
-                mark = '- ' if e.path in self.expanded else '+ '
+                mark = ('\u25be ' if e.path in self.expanded else '\u25b8 ')
                 fg = theme.TREE_DIR
             else:
                 mark = '  '
@@ -211,6 +238,28 @@ class FileTree(object):
             label = prefix + mark + e.name
             screen.put(rect.x, y, label[:rect.w], fg=fg, bg=bg,
                        attr=0 if ignored else (BOLD if e.is_dir else 0),
-                       max_x=rect.x2 - 2)
+                       max_x=edge - 1)
+            for level in range(e.depth):   # one line down each open folder
+                gx = rect.x + 1 + level
+                if gx < edge - 1:
+                    screen.put(gx, y, '\u2502', fg=theme.TREE_GUIDE, bg=bg)
             if git and not e.is_dir:
-                screen.put(rect.x2 - 2, y, git, fg=fg, bg=bg, attr=BOLD)
+                screen.put(edge - 1, y, git, fg=fg, bg=bg, attr=BOLD)
+        self._render_edge(screen, rect, edge, h)
+
+    def _render_edge(self, screen, rect, edge, h):
+        """The divider you drag to resize, doubling as the scroll indicator."""
+        if edge <= rect.x:
+            return
+        for y in range(rect.y, rect.y2):
+            behind = screen.cells[y][edge][2]
+            screen.put(edge, y, '\u2502', fg=theme.BORDER, bg=behind)
+        total = len(self.entries)
+        if not self.indicator_showing():
+            return
+        thumb = max(1, int(round(h * h / float(total))))
+        thumb = min(thumb, h - 1)
+        span = self.max_top()
+        offset = 0 if span == 0 else int(round((h - thumb) * self.top / float(span)))
+        offset = max(0, min(h - thumb, offset))
+        screen.fill(edge, rect.y + 1 + offset, 1, thumb, bg=theme.SCROLL_THUMB)

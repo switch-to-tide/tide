@@ -19,6 +19,8 @@ from .term import BOLD, DIM, RawTerminal, Rect, Screen
 from .termpanel import TerminalPanel
 
 SIDEBAR_W = 26
+MIN_SIDEBAR_W = 12           # narrower than this and names are unreadable
+MIN_MAIN_W = 30              # what the editor keeps when you drag the divider
 MESSAGE_SECONDS = 6          # how long a status message stays on the bar
 MIN_TERM_H = 3
 DEFAULT_TERM_H = 12
@@ -57,6 +59,9 @@ class App(object):
         self._last_tree_refresh = 0.0
         self.term_h = DEFAULT_TERM_H
         self.term_h_user_set = False
+        self.sidebar_w = SIDEBAR_W
+        self._tree_indicator = False
+        self._hbar_showing = False
         self.focus = 'editor'
         self.overlay = None
         self.message = ''
@@ -669,13 +674,21 @@ class App(object):
         self.message_time = time.time()
         self.need_render = True
 
+    def _sideways_bar_showing(self):
+        """Whether the pane on screen is drawing its sideways scrollbar."""
+        showing = getattr(self.editor, 'hbar_showing', None)   # not a diff tab
+        return bool(showing and showing())
+
     # ---------------- layout ----------------
     def layout(self):
         w, h = self.screen.width, self.screen.height
         prompt_h = 1 if (self.overlay is not None and not isinstance(self.overlay, (Help,))
                          and not getattr(self.overlay, 'is_list', False)) else 0
         content_h = max(1, h - 1 - prompt_h)
-        sw = SIDEBAR_W if self.show_tree and w > 50 else 0
+        sw = 0
+        if self.show_tree and w > 50:
+            sw = min(self.sidebar_w, max(MIN_SIDEBAR_W, w - MIN_MAIN_W))
+            sw = max(MIN_SIDEBAR_W, sw)
         rects = {'status': Rect(0, h - 1, w, 1),
                  'sidebar': Rect(0, 0, sw, content_h) if sw else None}
         main_x = sw
@@ -714,6 +727,8 @@ class App(object):
         cursor = None
         if r['sidebar']:
             self.tree.render(scr, r['sidebar'], self.focus == 'tree')
+            self._tree_indicator = self.tree.indicator_showing()
+        self._hbar_showing = self._sideways_bar_showing()
         self.render_switch(scr, r['switch'])
         self.render_tabs(scr, r['tabs'])
         if r['split'] is not None:
@@ -1236,6 +1251,13 @@ class App(object):
                     self.term_h = max(MIN_TERM_H, body_bottom - ev.y)
                     self.term_h_user_set = True
                 return
+            if target == 'vsplitter':
+                if ev.kind == 'drag':
+                    w = self.screen.width
+                    self.sidebar_w = max(MIN_SIDEBAR_W,
+                                         min(ev.x + 1, max(MIN_SIDEBAR_W,
+                                                           w - MIN_MAIN_W)))
+                return
             if target == 'editor':
                 main = self.big_term() if self.main_is_terminal() else self.editor
                 if r['split'] is not None:
@@ -1265,6 +1287,10 @@ class App(object):
                 self.focus = 'terminal'
                 self.mouse_capture = 'terminal'
             self.terminal.on_mouse(ev)
+            return
+        if r['sidebar'] and ev.x == r['sidebar'].x2 - 1 and ev.y < r['status'].y:
+            if ev.kind == 'press':       # the divider: drag it to resize
+                self.mouse_capture = 'vsplitter'
             return
         if r['sidebar'] and r['sidebar'].contains(ev.x, ev.y):
             if ev.kind == 'press':
@@ -1439,6 +1465,10 @@ class App(object):
         if self.message and time.time() - self.message_time >= MESSAGE_SECONDS:
             self.message = ''            # it has timed out; take it off the bar
             self.need_render = True
+        if self._tree_indicator and not self.tree.indicator_showing():
+            self.need_render = True      # the explorer's scroll bar has faded
+        if self._hbar_showing and not self._sideways_bar_showing():
+            self.need_render = True      # so has the editor's sideways one
         panels = {}
         if self.show_term and self.terminal.fd is not None:
             panels[self.terminal.fd] = (self.terminal, True)

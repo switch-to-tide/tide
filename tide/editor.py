@@ -9,6 +9,8 @@ from .highlight import Highlighter, LineStates
 from .keys import CTRL, ALT, SHIFT
 from .term import BOLD, DIM, REVERSE, Rect, char_width
 
+HSCROLL_FADE = 1.6       # seconds the sideways bar stays after you stop
+
 
 class Editor(object):
     is_diff = False
@@ -24,6 +26,9 @@ class Editor(object):
         self.indent_detected = False
         self.top = 0
         self.left = 0
+        self._widest = 0
+        self._widest_key = None
+        self.hscroll_at = 0.0             # when the sideways bar last woke up
         self.rect = Rect(0, 0, 1, 1)
         self.text_rect = Rect(0, 0, 1, 1)
         self.gutter = 4
@@ -117,6 +122,39 @@ class Editor(object):
         new_row = max(0, min(len(doc.lines) - 1, row + delta))
         new_col = self.x_to_col(new_row, doc.goal_col)
         self.set_cursor((new_row, new_col), extend, keep_goal=True)
+
+    def max_left(self):
+        """Furthest left column: the widest line, less one screenful."""
+        key = (self.doc._version, self.tab_width)
+        if self._widest_key != key:
+            lines = self.doc.lines
+            longest = sorted(range(len(lines)), key=lambda i: len(lines[i]),
+                             reverse=True)[:8]        # tabs can beat raw length
+            self._widest = max([self.col_to_x(i, len(lines[i])) for i in longest] or [0])
+            self._widest_key = key
+        return max(0, self._widest - max(1, self.text_rect.w))
+
+    def scroll_x(self, delta):
+        left = max(0, min(self.max_left(), self.left + delta))
+        if left != self.left:
+            self.left = left
+            self.hscroll_at = time.time()
+
+    def hbar(self):
+        """(thumb_width, thumb_offset) for the sideways bar, or None."""
+        r = self.text_rect
+        span = self.max_left()
+        if r.w < 4 or span <= 0:
+            return None                     # every line fits: no bar
+        total = span + r.w
+        thumb = max(2, int(round(r.w * r.w / float(total))))
+        thumb = min(thumb, r.w - 1)
+        offset = int(round((r.w - thumb) * min(self.left, span) / float(span)))
+        return thumb, max(0, min(r.w - thumb, offset))
+
+    def hbar_showing(self):
+        return (time.time() - self.hscroll_at < HSCROLL_FADE
+                and self.hbar() is not None)
 
     def max_top(self):
         """Highest first-visible line: the last screenful of the document."""
@@ -596,8 +634,7 @@ class Editor(object):
             self.scroll(3)
             return True
         if ev.kind in ('wheel_left', 'wheel_right'):
-            step = -4 if ev.kind == 'wheel_left' else 4
-            self.left = max(0, self.left + step)
+            self.scroll_x(-4 if ev.kind == 'wheel_left' else 4)
             return True
         if self.drag_mode == 'scrollbar':
             if ev.kind == 'drag':
@@ -749,7 +786,21 @@ class Editor(object):
                 if r.x <= sx < r.x2:
                     screen.fill(sx, y, 1, 1, bg=theme.SELECTION)
         self._render_scrollbar(screen, focused)
+        self._render_hbar(screen)
         return self.cursor_screen_pos()
+
+    def _render_hbar(self, screen):
+        """A sideways bar along the last text row, while you are scrolling."""
+        if not self.hbar_showing():
+            return
+        thumb, offset = self.hbar()
+        r = self.text_rect
+        y = r.y2 - 1
+        for x in range(r.x, r.x2):          # keep the text, tint behind it
+            ch, fg, _bg, attr = screen.cells[y][x]
+            inside = r.x + offset <= x < r.x + offset + thumb
+            screen.put(x, y, ch or ' ', fg=fg, attr=attr,
+                       bg=theme.SCROLL_THUMB if inside else theme.SCROLL_TRACK)
 
     def _render_scrollbar(self, screen, focused):
         if self.sb_x is None:

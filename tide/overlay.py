@@ -395,6 +395,7 @@ HELP_TEXT = [
     ('Editing', [
         ('click / drag', 'move cursor / select'),
         ('scrollbar (right edge)', 'drag the thumb, or click the track to jump'),
+        ('drag the explorer edge', 'resize the side panel'),
         ('double / triple click', 'select word / line'),
         ('shift+click, shift+arrows', 'extend selection'),
         ('ctrl+arrows', 'move by word'),
@@ -411,7 +412,7 @@ HELP_TEXT = [
     ]),
     ('Bottom terminal panel', [
         ('ctrl+j', 'show/hide the panel (and focus it)'),
-        ('drag the TERMINAL bar', 'resize the panel'),
+        ('drag the TERMINAL bar', 'resize the bottom panel'),
         ('drag in terminal', 'select + copy'),
         ('mouse wheel', 'scrollback (stays put as output arrives)'),
     ]),

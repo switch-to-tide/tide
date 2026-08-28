@@ -39,7 +39,16 @@ whatever you ask for that time, so it downgrades as easily as it updates.
 `git ls-remote --tags https://github.com/switch-to-tide/tide.git` lists what
 there is; `tide --version` says what you have.
 
-To update to the newest code, run the same curl command again. To remove it:
+**To update**, from anywhere:
+
+```sh
+tide --update            # the newest code
+tide --update 0.1.0      # or a particular version, back or forward
+```
+
+Re-running the curl command does the same thing. A tide that is already open
+keeps the version it started with — open a new one to use what you just
+pulled. To remove it:
 
 ```sh
 rm -rf ~/.local/share/tide ~/.local/bin/tide
@@ -66,6 +75,7 @@ python3 main.py --no-autosave   # save only when you press ctrl+s
 python3 main.py --autosave-delay 3    # wait 3s of quiet instead of 0.8
 python3 main.py --max-lines 2000      # ask before opening anything longer
 python3 main.py --max-mb 0.5          # ask before opening anything bigger
+python3 main.py --update              # pull the newest code and exit
 ```
 
 Requires Python 3.7+ and a terminal that speaks xterm mouse reporting
@@ -84,6 +94,8 @@ Requires Python 3.7+ and a terminal that speaks xterm mouse reporting
   shrinks as the file grows, shows where you are from top to bottom, drags like
   any other scrollbar, and clicking the track jumps there. It disappears when
   the whole file already fits.
+- Sideways, a file scrolls only as far as its widest line, with a matching bar
+  along the bottom of the pane while you scroll and gone a moment later.
 - Undo/redo with sensible grouping (a typing run undoes as one edit).
 - Auto-indent, indent/dedent a selection, comment toggle, duplicate, move lines,
   delete lines, word-wise motion and deletion.
@@ -223,6 +235,13 @@ Requires Python 3.7+ and a terminal that speaks xterm mouse reporting
 **Panels**
 - File explorer, editor tabs, terminal, status bar. Click a pane to focus it,
   or cycle with `f6`; `ctrl+b` / `ctrl+j` show and hide the side and bottom panels.
+- Both dividers drag: the line down the right of the explorer resizes it, and
+  the `TERMINAL` bar resizes the bottom panel. Neither pane can be dragged
+  away entirely.
+- The explorer has its own scrollbar, which appears down that divider while
+  you scroll and fades once you stop; it stops at the last entry rather than
+  scrolling into empty space. Folders open and close with `▸` / `▾`, and
+  everything inside an open folder carries a faint line down the indent.
 
 ## Keys
 
@@ -243,6 +262,7 @@ Press `f1` inside the app for this list.
 | `f2`, or the `Editor` / `Terminals` switch | switch the main area: editor <-> full-size terminal |
 | `f4` | new full-size terminal session |
 | `f6` | cycle focus between panes |
+| drag the explorer edge / the `TERMINAL` bar | resize the side / bottom panel |
 | `ctrl+q` | quit (asks about unsaved files) |
 | `f1` | help |
 | **editor** | |
@@ -299,7 +319,7 @@ running whether or not they are on screen.
 ## Tests
 
 ```sh
-python3 tests/run_all.py       # 461 tests, ~3 min
+python3 tests/run_all.py       # 506 tests, ~4 min
 python3 tests/test_units.py    # editing core, instant
 python3 tests/test_saving.py   # what lands on disk, instant
 python3 tests/test_durability.py   # quick exits, signals, lost terminals
@@ -309,6 +329,8 @@ python3 tests/test_parity.py   # the VS Code behaviours above
 python3 tests/test_sync.py     # vim / assistants / git writing the same file
 python3 tests/test_workflows.py    # whole sessions, and a no-silent-loss property
 python3 tests/test_filesystem.py   # odd content, odd names, odd file types, failed writes
+python3 tests/test_panes.py    # dividers, tree scrolling, the sideways bar
+python3 tests/test_update.py   # tide --update, including from inside tide
 ```
 
 `tests/harness.py` launches the IDE on its own pty and feeds it real key and
