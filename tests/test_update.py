@@ -270,5 +270,57 @@ class TestWhenTheRemoteIsWrong(UpdateTest):
                          before)
 
 
+class TestATagThatMoved(UpdateTest):
+    """A version tag repointed on the remote must not stop an update.
+
+    git refuses to overwrite a tag it already has - 'would clobber existing
+    tag' - and the whole fetch fails with it, which once left every install
+    stuck on the version it had.
+    """
+
+    def setUp(self):
+        UpdateTest.setUp(self)
+        self.source = os.path.join(self.tmp, 'source')
+        self.was = git(self.source, 'rev-parse', 'v9.9.1').strip()
+
+    def tearDown(self):
+        # the remote is shared by the whole class; put the tag back
+        git(self.source, 'tag', '-f', 'v9.9.1', self.was)
+        git(self.source, 'push', '-q', '--force', 'origin', 'v9.9.1')
+
+    def move_the_tag(self):
+        git(self.source, 'tag', '-f', 'v9.9.1')     # now on the newer commit
+        git(self.source, 'push', '-q', '--force', 'origin', 'v9.9.1')
+
+    def test_the_update_still_works(self):
+        self.assertEqual(self.installed(), '9.9.1')
+        self.move_the_tag()
+        code, out = self.update()
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.installed(), '9.9.2', out)
+
+    def test_the_tag_is_taken_as_it_now_stands(self):
+        self.move_the_tag()
+        self.update()
+        code, out = self.update('9.9.1')
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.installed(), '9.9.2',
+                         'v9.9.1 now points at the newer commit')
+
+    def test_the_installer_gets_past_it_too(self):
+        self.move_the_tag()
+        installer = os.path.join(ROOT, 'install.sh')
+        home = os.path.join(self.tmp, 'installed')
+        shutil.copytree(self.install, home)
+        env = dict(os.environ, TIDE_HOME=home,
+                   TIDE_BIN=os.path.join(self.tmp, 'bin'),
+                   TIDE_REPO=self.remote)
+        proc = subprocess.Popen(['sh', installer], env=env,
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        out = proc.communicate()[0].decode()
+        self.assertEqual(proc.returncode, 0, out)
+        self.assertEqual(cli.installed_version(home), '9.9.2', out)
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

@@ -48,7 +48,13 @@ fi
 
 if [ -d "$HOME_DIR/.git" ]; then
     echo "Updating $HOME_DIR to $REF"
-    git -C "$HOME_DIR" fetch -q --depth 1 --tags origin "$REF"
+    # --force: a tag that moved on the remote must not stop the fetch, and a
+    # failure here has to be said out loud rather than ending the script
+    if ! git -C "$HOME_DIR" fetch -q --depth 1 --tags --force origin "$REF"; then
+        echo "Could not fetch $REF from $(git -C "$HOME_DIR" remote get-url origin)." >&2
+        echo "Delete $HOME_DIR and run this again to start fresh." >&2
+        exit 1
+    fi
     if ! git -C "$HOME_DIR" checkout -q --detach FETCH_HEAD; then
         echo "$HOME_DIR has changes of its own; leaving it alone." >&2
         exit 1

@@ -28,6 +28,10 @@ def installed_version(root):
 
 HOME_REPO = 'github.com/switch-to-tide/tide'
 
+# --force so that a tag which has been moved on the remote does not stop the
+# whole fetch with 'would clobber existing tag'
+FETCH = ['fetch', '--depth', '1', '--tags', '--force', 'origin']
+
 
 def home_url():
     """Where tide comes from; TIDE_REPO points a fork or a mirror elsewhere."""
@@ -119,7 +123,7 @@ def update(version):
         ref = version
     was = installed_version(root)
     origin = (_git(root, ['remote', 'get-url', 'origin'])[1] or '').strip()
-    code, said = _git(root, ['fetch', '--depth', '1', '--tags', 'origin', ref])
+    code, said = _git(root, FETCH + [ref])
     if code is None:
         sys.stderr.write('tide --update needs git on PATH.\n')
         return 1
@@ -133,8 +137,7 @@ def update(version):
             _say('This copy was following %s.\nFollowing %s from now on.'
                  % (origin or 'nowhere', canonical))
             following = canonical
-            code, said = _git(root, ['fetch', '--depth', '1', '--tags',
-                                     'origin', ref])
+            code, said = _git(root, FETCH + [ref])
         if code != 0:
             _explain(root, following, ref, said)
             return 1

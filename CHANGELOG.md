@@ -6,7 +6,15 @@ Versions are tagged in git as `v0.1.0` and so on, and the installer takes one:
 curl -fsSL https://raw.githubusercontent.com/switch-to-tide/tide/main/install.sh | sh -s -- 0.1.0
 ```
 
-## 0.1.6 — unreleased
+## 0.1.7 — unreleased
+
+- **Fixed updates being stuck.** A version tag that had been repointed on the
+  remote made `git fetch --tags` refuse the whole fetch - "would clobber
+  existing tag" - so `tide --update` and re-running the installer both stopped
+  without moving, and without saying why. Both now fetch with `--force`, and
+  the installer says so out loud instead of ending quietly.
+
+## 0.1.6 — 2026-08-28
 
 - A sound file deleted while its tab is open no longer trips anything up: the
   tab warns, its name picks up a red `!` beside it, and it keeps playing from
