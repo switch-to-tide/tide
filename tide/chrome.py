@@ -47,8 +47,10 @@ def arrange(rects):
 
     The panes keep their places and proportions; each simply gives up a cell
     to its border and another to the gap, and the tab strip moves inside the
-    box it belongs to. Every box is left under `<name>_box` for the painting
-    and for hit testing the edges you drag.
+    box it belongs to. The boxes reach the right hand edge of the screen: the
+    scrollbar and the change ruler take enough room there as it is. Every box
+    is left under `<name>_box` for the painting and for hit testing the edges
+    you drag.
     """
     if not theme.BOXED:
         return rects
@@ -69,13 +71,13 @@ def arrange(rects):
     bottom = terminal.y if terminal else editor.y2
     height = max(3, bottom - top)
     if split is None:
-        box = Rect(editor.x, top, max(3, editor.w - 1), height)
+        box = Rect(editor.x, top, max(3, editor.w), height)
         out['editor_box'] = box
         out['tabs'], out['editor'] = _split_tabs(inner(box))
         out['divider'] = None
     else:
         left = Rect(editor.x, top, max(3, editor.w), height)
-        right = Rect(split.x, top, max(3, split.w - 1), height)
+        right = Rect(split.x, top, max(3, split.w), height)
         out['editor_box'], out['split_box'] = left, right
         left_tabs, out['editor'] = _split_tabs(inner(left))
         right_tabs, out['split'] = _split_tabs(inner(right))
@@ -84,7 +86,7 @@ def arrange(rects):
         out['tabs_left'], out['tabs_right'] = left_tabs, right_tabs
         out['divider'] = right.x - 1
     if terminal is not None:
-        box = Rect(terminal.x, terminal.y, max(3, terminal.w - 1), terminal.h)
+        box = Rect(terminal.x, terminal.y, max(3, terminal.w), terminal.h)
         out['terminal_box'] = box
         out['terminal'] = inner(box)
     return out

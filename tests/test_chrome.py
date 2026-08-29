@@ -389,9 +389,9 @@ class TestTheMenus(unittest.TestCase):
         menu = self.open_menu('Tide')
         labels = [item[0] for item in menu.items if item]
         self.assertIn('Settings', labels[0])
-        self.assertIn('Open File', labels[1])
         self.assertIn('session', ' '.join(labels))
         self.assertIn('Quit', labels[-1])
+        self.assertNotIn('Open File', ' '.join(labels), 'that lives in File now')
 
     def test_view_offers_the_panes_and_the_review(self):
         menu = self.open_menu('View')
@@ -523,11 +523,12 @@ class TestTheMenus(unittest.TestCase):
         self.assertEqual(self.app.editor.title, 'deep.py')
         self.assertIsNone(self.app.overlay)
 
-    def test_go_to_line_is_offered_above_the_documents(self):
+    def test_file_offers_opening_and_going_to_a_line(self):
         items = self.app.menu_items('File')
-        self.assertIn('Go to line', items[0][0])
-        self.assertIsNone(items[1], 'no separator under it')
-        self.assertIsNotNone(items[0][2])
+        self.assertIn('Open File', items[0][0])
+        self.assertIn('Go to line', items[1][0])
+        self.assertIsNone(items[2], 'no separator above the documents')
+        self.assertIsNotNone(items[1][2])
 
     def test_a_long_file_menu_stops_and_scrolls(self):
         from tide.keys import Mouse
@@ -556,12 +557,32 @@ class TestTheMenus(unittest.TestCase):
         self.assertEqual(self.app.editor.title,
                          menu.items[before + 1][0].strip(' \u2713*'))
 
-    def test_tide_never_asks_for_motion_reports(self):
-        """Any-motion reporting floods a slow link; tide does without it."""
+    def test_the_pointer_is_only_reported_while_a_menu_is_down(self):
+        """Motion reports flood a slow link, so they are asked for narrowly."""
+        import re
+        from tide.keys import Key
+
+        def state():
+            found = re.findall(r'\[\?1003([hl])', self.app.out.getvalue())
+            return found[-1] if found else 'l'
+        self.assertEqual(state(), 'l', 'reports were asked for at rest')
+        self.open_menu('View')
+        self.assertEqual(state(), 'h', 'the menu cannot hear the pointer')
+        self.app.handle_key(Key('escape'))
+        self.assertEqual(state(), 'l', 'escape left the reports running')
         menu = self.open_menu('View')
-        self.press(menu.rect.x + 3, menu.rect.y + 1)
-        self.open_menu('Tide')
+        self.press(menu.rect.x + 3, menu.rect.y + 1)          # choose an item
+        self.assertEqual(state(), 'l', 'choosing left the reports running')
+        menu = self.open_menu('View')
+        self.press(2, menu.rect.y2 + 2)                       # a click outside
+        self.assertEqual(state(), 'l', 'clicking away left the reports running')
+
+    def test_the_hover_setting_turns_the_reports_off(self):
+        import re
+        self.app.settings['menu_hover'] = False
+        self.open_menu('View')
         self.assertNotIn('[?1003h', self.app.out.getvalue())
+        self.assertIsNotNone(self.app.overlay, 'the menu stopped opening')
 
     def test_it_skips_the_separators(self):
         menu = self.open_menu('Tide')

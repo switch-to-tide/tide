@@ -6,6 +6,20 @@ Versions are tagged in git as `v0.1.0` and so on, and the installer takes one:
 curl -fsSL https://raw.githubusercontent.com/switch-to-tide/tide/main/install.sh | sh -s -- 0.1.0
 ```
 
+## 0.1.27 — 2026-08-29
+
+- The highlight follows the pointer in an open menu again, and moving on to
+  another name opens that menu. It is asked for as narrowly as it can be -
+  only while a menu is down, off the moment it closes, checked every pass
+  round the loop, and never reaching the editor, the explorer or a shell. If
+  your terminal still dislikes it, **Menu follows mouse** in the settings
+  turns it off and everything else stays as it is.
+- The panes reach the right hand edge of the screen now: the border, the
+  scrollbar, the gap and the change ruler took four columns and a margin, and
+  the margin is gone.
+- **Open File...** has moved from the Tide menu to the File menu, where it
+  belongs, above Go to line... Help lists what each menu holds.
+
 ## 0.1.26 — 2026-08-29
 
 - **tide no longer asks the terminal to report the pointer moving.** The

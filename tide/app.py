@@ -84,6 +84,7 @@ class App(object):
         self._main_w = 80            # width the layout last gave the panes
         self.menu_spans = []
         self._menu_end = 0
+        self._tracking = False
         self._seen_tab = None        # the tab in front of us, and the one
         self._prev_tab = None        # before it, in each of the two groups
         self._seen_term = None
@@ -1727,9 +1728,9 @@ class App(object):
 
     def handle_mouse(self, ev):
         if ev.kind == 'move':
-            # tide never asks the terminal to report the pointer moving: it
-            # is a flood of events for nothing, and a slow link drowns in the
-            # repaints. Anything that arrives anyway is only a menu's business
+            # only an open menu ever asked to hear this, and it arrives in
+            # floods: it must cost nothing when it changes nothing, and it
+            # must never reach the editor, the tree or a shell
             if isinstance(self.overlay, menus.Dropdown):
                 self.overlay.on_mouse(ev)
             return
@@ -1919,16 +1920,35 @@ class App(object):
         if self.review.on_key(key):
             self.need_render = True
 
+    def track_pointer(self, on):
+        """Ask the terminal to report the pointer moving, or stop.
+
+        Only while a menu is open, and only if the setting allows it: it is a
+        report for every cell the pointer crosses, so it is asked for as
+        narrowly as possible and turned off the moment the menu goes.
+        """
+        on = bool(on) and (self.settings.get('menu_hover', True) if on else False)
+        if on == self._tracking:
+            return
+        self._tracking = on
+        try:
+            self.out.write('\x1b[?1003h' if on else '\x1b[?1003l')
+            self.out.flush()
+        except Exception:
+            pass
+
     def open_menu(self, name, x=None):
         """Drop one of the menus open under its name."""
         if self.menu_open == name:
             self.menu_open = None
             self.overlay = None
+            self.track_pointer(False)
             self.need_render = True
             return
         items = self.menu_items(name)
         if items is None:
             self.menu_open = None
+            self.track_pointer(False)
             self.overlay = Help()          # Help is the shortcut list itself
             self.need_render = True
             return
@@ -1937,6 +1957,7 @@ class App(object):
         self.menu_open = name
         self.overlay = menus.Dropdown(self, name, x, self.rects['switch'].y + 1,
                                       items, width=self.menu_width())
+        self.track_pointer(True)
         self.need_render = True
 
     def open_menu_beside(self, name, delta):
@@ -1958,7 +1979,8 @@ class App(object):
 
     def open_documents(self):
         """The File menu: go to a line, and every open document."""
-        items = [('Go to line...', 'ctrl+g',
+        items = [('Open File...', 'ctrl+o', self.browse_files),
+                 ('Go to line...', 'ctrl+g',
                   self.prompt_goto if self.text_editor() else None),
                  menus.SEPARATOR]
         names = self.editor_titles()
@@ -1988,8 +2010,6 @@ class App(object):
         if name == 'Tide':
             return [
                 ('Settings...', 'f9', self.open_settings),
-                menus.SEPARATOR,
-                ('Open File...', 'ctrl+o', self.browse_files),
                 menus.SEPARATOR,
                 ('Save to named session...', '',
                  None if self.session else self.name_session),
@@ -2333,6 +2353,8 @@ class App(object):
                     self.handle_paste(ev)
                 if not self.running:
                     break
+        if self._tracking and not isinstance(self.overlay, menus.Dropdown):
+            self.track_pointer(False)   # nothing is listening: stop the reports
         if self._audio_busy():
             self.need_render = True
         self.autosave_tick()

@@ -205,7 +205,10 @@ class TestModernBoxes(LookTest):
         side, main = r['sidebar_box'], r['editor_box']
         self.assertGreater(main.x, side.x2, 'the side and main boxes touch')
         self.assertGreater(side.x, 0, 'no margin on the left')
-        self.assertLess(main.x2, app.screen.width, 'no margin on the right')
+        # on the right the boxes reach the edge: the scrollbar and the change
+        # ruler take enough room over there as it is
+        self.assertEqual(main.x2, app.screen.width,
+                         'the main box no longer reaches the right edge')
         # above and below they meet on adjacent rows: a blank row reads as
         # twice the gap a blank column does, cells being taller than wide
         self.assertEqual(r['terminal_box'].y, main.y2,

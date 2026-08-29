@@ -67,6 +67,7 @@ class Dropdown(object):
     def close(self):
         self.app.menu_open = None
         self.app.overlay = None
+        self.app.track_pointer(False)     # stop the reports with the menu
         self.app.need_render = True
 
     def choose(self, index):
@@ -135,9 +136,8 @@ class Dropdown(object):
             self.app.need_render = True
             return True
         if ev.kind in ('move', 'drag'):
-            # dragging is the only pointer movement tide hears about, and it
-            # behaves as a menu should: the highlight follows it, and moving
-            # on to another name opens that one
+            # the highlight follows the pointer, dragged or not, and moving
+            # on to another name up on the bar opens that one
             if self.on_bar(ev):
                 return True
             index = self.y_to_index(ev.y)

@@ -545,6 +545,14 @@ HELP_TEXT = [
         ('f1', 'this help'),
         ('ctrl+q', 'quit'),
     ]),
+    ('The menus', [
+        ('Tide', 'settings, named sessions, quit'),
+        ('File', 'open a file, go to a line, and every open document'),
+        ('View', 'the panes, split view, the git review'),
+        ('Help', 'this'),
+        ('click a name', 'opens that menu; another click closes it'),
+        ('drag along the bar', 'moves between them, as menus do'),
+    ]),
     ('Named sessions', [
         ('Tide > Save to named...', 'remember this folder and these files'),
         ('Tide > Rename session', 'the same session, a different name'),
