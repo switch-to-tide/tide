@@ -570,6 +570,27 @@ class TestTheMenus(unittest.TestCase):
         self.assertEqual(self.app.editor.title,
                          menu.items[before + 1][0].strip(' \u2713*'))
 
+    def test_the_mouse_still_works_after_a_menu_closes(self):
+        """1000, 1002 and 1003 are one mode: turning 1003 off turns the
+
+        mouse off altogether, and tide is then deaf to clicks while the
+        terminal does its own selection. What tide wants must be asked for
+        again every time the hover reporting stops.
+        """
+        import re
+        from tide.keys import Key
+        self.open_menu('View')
+        mark = len(self.app.out.getvalue())
+        self.app.handle_key(Key('escape'))
+        self.app.render()
+        asked = re.findall(r'\[\?(\d+)([hl])', self.app.out.getvalue()[mark:])
+        modes = dict(asked)
+        self.assertEqual(modes.get('1003'), 'l', 'hover reporting was left on')
+        for mode in ('1000', '1002', '1006'):
+            self.assertEqual(modes.get(mode), 'h',
+                             'mode %s was not asked for again: the mouse is '
+                             'dead after a menu closes' % mode)
+
     def test_the_pointer_is_only_reported_while_a_menu_is_down(self):
         """Motion reports flood a slow link, so they are asked for narrowly."""
         import re

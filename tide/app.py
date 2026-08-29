@@ -1963,7 +1963,12 @@ class App(object):
             return
         self._tracking = on
         try:
-            self.out.write('\x1b[?1003h' if on else '\x1b[?1003l')
+            # 1000, 1002 and 1003 are one tracking mode, not three switches:
+            # turning 1003 off turns the mouse off altogether, which leaves
+            # tide deaf to it and the terminal doing its own selection. So
+            # what tide always wants is asked for again on the way back down
+            self.out.write('\x1b[?1003h\x1b[?1006h' if on else
+                           '\x1b[?1003l\x1b[?1000h\x1b[?1002h\x1b[?1006h')
             self.out.flush()
         except Exception:
             pass

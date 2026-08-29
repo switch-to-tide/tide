@@ -6,6 +6,16 @@ Versions are tagged in git as `v0.1.0` and so on, and the installer takes one:
 curl -fsSL https://raw.githubusercontent.com/switch-to-tide/tide/main/install.sh | sh -s -- 0.1.0
 ```
 
+## 0.1.31 — 2026-08-29
+
+- **Fixed the mouse dying after a menu was opened and closed.** Closing one
+  turned off the pointer reporting it had asked for, and 1000, 1002 and 1003
+  are not three switches but one mode: turning the last off turns the mouse
+  off altogether. tide went deaf to clicks and the terminal started doing its
+  own selection, which is exactly what it looked like. What tide always wants
+  - clicks, drags and SGR coordinates - is now asked for again every time the
+  hover reporting stops.
+
 ## 0.1.30 — 2026-08-29
 
 - Writing a frame can no longer spin or hang. Waiting for room to write now
