@@ -483,6 +483,46 @@ class TestTheMenus(unittest.TestCase):
                 self.assertFalse(start < x2 and x1 < end,
                                  'a tab sits under a menu name')
 
+    def test_every_menu_is_the_same_width(self):
+        from tide.keys import Key
+        widths = set()
+        for name in ('Tide', 'File', 'View'):
+            menu = self.open_menu(name)
+            widths.add(menu.rect.w)
+            self.app.handle_key(Key('escape'))
+        self.assertEqual(len(widths), 1, 'the menus were %s wide' % sorted(widths))
+
+    def test_hovering_the_bar_switches_menus(self):
+        from tide.keys import Mouse
+        self.open_menu('Tide')
+        span = next(s for s in self.app.menu_spans if s[2] == 'View')
+        self.app.handle_mouse(Mouse('move', span[0] + 1, 0))
+        self.app.render()
+        self.assertEqual(self.app.menu_open, 'View')
+        self.assertEqual(self.app.overlay.name, 'View')
+
+    def test_hovering_help_does_not_open_it(self):
+        from tide.keys import Mouse
+        self.open_menu('Tide')
+        span = next(s for s in self.app.menu_spans if s[2] == 'Help')
+        self.app.handle_mouse(Mouse('move', span[0] + 1, 0))
+        self.assertEqual(self.app.menu_open, 'Tide', 'a button opened on hover')
+
+    def test_the_file_menu_goes_to_a_document(self):
+        self.app.open_file(os.path.join(self.tmp, 'sub', 'deep.py'))
+        self.app.active = 0
+        self.app.render()
+        self.open_menu('File')
+        self.pick('deep.py')
+        self.assertEqual(self.app.editor.title, 'deep.py')
+        self.assertIsNone(self.app.overlay)
+
+    def test_go_to_line_is_offered_above_the_documents(self):
+        items = self.app.menu_items('File')
+        self.assertIn('Go to line', items[0][0])
+        self.assertIsNone(items[1], 'no separator under it')
+        self.assertIsNotNone(items[0][2])
+
     def test_it_skips_the_separators(self):
         menu = self.open_menu('Tide')
         seen = set()

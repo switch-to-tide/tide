@@ -9,7 +9,7 @@ so nothing here is a second way of doing anything.
 from . import theme
 from .term import BOLD, DIM, Rect
 
-NAMES = ('Tide', 'View', 'Help')
+NAMES = ('Tide', 'File', 'View', 'Help')
 SEPARATOR = None
 
 
@@ -41,11 +41,12 @@ class Dropdown(object):
 
     is_list = False
 
-    def __init__(self, app, name, x, y, items):
+    def __init__(self, app, name, x, y, items, width=0):
         self.app = app
         self.name = name
         self.x = x
         self.y = y
+        self.width = width            # the same for every menu on the bar
         self.items = items            # (label, hint, action) or SEPARATOR
                                       # an item with no action is greyed out
         self.index = self._first()
@@ -110,6 +111,14 @@ class Dropdown(object):
 
     def on_mouse(self, ev):
         if ev.kind == 'move':
+            if ev.y == self.y - 1:
+                # along the bar with a menu down: the one under the pointer
+                for x1, x2, name in self.app.menu_spans:
+                    if x1 <= ev.x < x2 and name != self.name and \
+                            self.app.menu_items(name) is not None:
+                        self.app.open_menu(name, x1)   # a menu, not a button
+                        return True
+                return True
             index = self.y_to_index(ev.y)
             if self.rect.contains(ev.x, ev.y) and self.pickable(index) \
                     and index != self.index:
@@ -132,8 +141,7 @@ class Dropdown(object):
 
     # ---------------- painting ----------------
     def render(self, screen, area):
-        width = max(len('%s%s' % (item[0], item[1])) + 6
-                    for item in self.items if item is not SEPARATOR)
+        width = self.width or item_width(self.items)
         width = min(max(width, 18), area.w - 2)
         height = len(self.items) + 2
         x = min(self.x, area.x2 - width - 1)
@@ -158,18 +166,25 @@ class Dropdown(object):
                 screen.put(x + 1, row, '─' * (width - 2), fg=border,
                            bg=theme.PANEL_ALT, attr=DIM)
                 continue
-            label, hint, action = item
+            label, hint, action = item[0], item[1], item[2]
+            own = item[3] if len(item) > 3 else 0     # italic, struck through
             chosen = i == self.index
             off = action is None                    # there, but not for now
             bg = theme.TREE_SEL_BG if chosen else theme.PANEL_ALT
             screen.fill(x + 1, row, width - 2, 1, bg=bg)
             screen.put(x + 2, row, label, fg=theme.FG_DIM if off else theme.FG,
-                       bg=bg, attr=DIM if off else (BOLD if chosen else 0),
-                       max_x=x + width - 2)
+                       bg=bg, attr=own | (DIM if off else (BOLD if chosen else 0)),
+                       max_x=x + width - 2 - (len(hint) + 1 if hint else 0))
             if hint:
                 screen.put(x + width - 2 - len(hint), row, hint,
                            fg=theme.FG_DIM, bg=bg, max_x=x + width - 1)
         return None
+
+
+def item_width(items):
+    """How wide a menu has to be to hold its longest line."""
+    return max([len('%s%s' % (item[0], item[1])) + 6
+                for item in items if item is not SEPARATOR] or [18])
 
 
 def tick(on):

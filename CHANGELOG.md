@@ -6,6 +6,20 @@ Versions are tagged in git as `v0.1.0` and so on, and the installer takes one:
 curl -fsSL https://raw.githubusercontent.com/switch-to-tide/tide/main/install.sh | sh -s -- 0.1.0
 ```
 
+## 0.1.24 — 2026-08-29
+
+- **A File menu**, between Tide and View: every open document, named exactly
+  as its tab is - the git letter, italics for a file from outside the project,
+  a strikethrough for one deleted on disk, and a tick beside the one you are
+  looking at. Choosing one goes to it, which beats hunting along a crowded tab
+  strip. **Go to line...** sits above them, greyed out unless the tab in front
+  is a document; a number before the first line or past the last takes you to
+  the first or the last.
+- The menus are all one width now, and while one is open, moving the pointer
+  along the bar opens whichever you are over. Clicking the name of the open
+  one still closes it, and Help still needs a click, so a sweep across the bar
+  cannot land you in the shortcut list.
+
 ## 0.1.23 — 2026-08-29
 
 - **Long lines can wrap.** A new setting, *Long lines*: wrap text files (the

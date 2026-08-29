@@ -29,6 +29,7 @@ MIN_MAIN_W = 30              # what the editor keeps when you drag the divider
 MESSAGE_SECONDS = 6          # how long a status message stays on the bar
 MIN_TERM_H = 3
 DEFAULT_TERM_H = 12
+MENU_MAX_W = 46      # menus are all one width; a long name is cropped
 
 
 class App(object):
@@ -82,6 +83,7 @@ class App(object):
         self._splitter_hold = 0      # where on the divider a drag took hold
         self._main_w = 80            # width the layout last gave the panes
         self.menu_spans = []
+        self._menu_end = 0
         self._seen_tab = None        # the tab in front of us, and the one
         self._prev_tab = None        # before it, in each of the two groups
         self._seen_term = None
@@ -1130,18 +1132,24 @@ class App(object):
         """The menus, across the very top - where the boxes leave room."""
         row = Rect(0, 0, width, 1)
         scr.fill(0, 0, width, 1, bg=theme.PANEL)
-        self.menu_spans, _end = menus.MenuBar.render(scr, row, self.menu_open)
+        self.menu_spans, self._menu_end = menus.MenuBar.render(scr, row,
+                                                               self.menu_open)
 
     def render_switch(self, scr, rect):
         """The row above the tabs: the menus, then what the main area shows."""
-        scr.fill(rect.x, rect.y, rect.w, 1, bg=theme.PANEL)
         self.toggle_spans = []
         x = rect.x + 1
         if not chrome.boxed() or rect.x == 0:
             # the menus belong at the very top left whatever else is showing,
             # so when nothing is to the left of this row they go in it
+            scr.fill(rect.x, rect.y, rect.w, 1, bg=theme.PANEL)
             self.menu_spans, x = menus.MenuBar.render(scr, rect, self.menu_open)
             x += 1
+        else:
+            # the bar was drawn above the explorer and may reach past its
+            # edge: start after it, and leave what it painted alone
+            x = min(max(x, self._menu_end + 1), rect.x2)
+            scr.fill(x, rect.y, max(0, rect.x2 - x), 1, bg=theme.PANEL)
         if not self.split:           # in split view both are already on screen
             # in split view both sets of tabs are on screen, so there is
             # nothing to switch between
@@ -1570,8 +1578,11 @@ class App(object):
             except ValueError:
                 self.status('Not a line number: %s' % text)
                 return
-            ed.set_cursor((max(0, n - 1), 0))
-            ed.top = max(0, n - 1 - ed.text_rect.h // 2)
+            # before the first line is the first line, past the last is the
+            # last: a number out of range still takes you somewhere sensible
+            row = max(0, min(len(ed.doc.lines) - 1, n - 1))
+            ed.set_cursor((row, 0))
+            ed.top = max(0, row - ed.text_rect.h // 2)
         self.overlay = Prompt('Go to line:', on_accept=accept,
                               info='1-%d' % len(ed.doc.lines))
         self.need_render = True   # show it at once
@@ -1924,7 +1935,7 @@ class App(object):
         items = self.menu_items(name)
         if items is None:
             self.menu_open = None
-            self.overlay = None
+            self.track_pointer(False)
             self.overlay = Help()          # Help is the shortcut list itself
             self.need_render = True
             return
@@ -1932,7 +1943,7 @@ class App(object):
             x = next((s[0] for s in self.menu_spans if s[2] == name), 1)
         self.menu_open = name
         self.overlay = menus.Dropdown(self, name, x, self.rects['switch'].y + 1,
-                                      items)
+                                      items, width=self.menu_width())
         self.track_pointer(True)
         self.need_render = True
 
@@ -1943,6 +1954,41 @@ class App(object):
             return
         self.menu_open = None
         self.open_menu(order[(order.index(name) + delta) % len(order)])
+
+    def menu_width(self):
+        """One width for all of them, so the box does not jump about."""
+        widest = 0
+        for name in menus.NAMES:
+            items = self.menu_items(name)
+            if items:
+                widest = max(widest, menus.item_width(items))
+        return min(max(widest, 18), MENU_MAX_W)
+
+    def open_documents(self):
+        """The File menu: go to a line, and every open document."""
+        items = [('Go to line...', 'ctrl+g',
+                  self.prompt_goto if self.text_editor() else None),
+                 menus.SEPARATOR]
+        names = self.editor_titles()
+        marks = self.tab_git_marks()
+        for i, ed in enumerate(self.editors):
+            style = ITALIC if self.outside_project(getattr(ed, 'path', None)) else 0
+            if getattr(ed.doc, 'disk_missing', False):
+                style |= STRIKE
+            letter = (marks[i][0] if marks[i] else '') or ''
+            label = menus.tick(i == self.active) + names[i] + \
+                ('*' if ed.doc.dirty else '')
+            items.append((tabnames.crop(label, MENU_MAX_W - 8), letter,
+                          (lambda n=i: self.show_tab(n)), style))
+        return items
+
+    def show_tab(self, index):
+        """Go to that document, from the File menu."""
+        if 0 <= index < len(self.editors):
+            self.active = index
+            self.main_view = 'editor'
+            self.focus = 'editor'
+            self.need_render = True
 
     def menu_items(self, name):
         """What each menu offers. None means it is a button, not a menu."""
@@ -1960,6 +2006,8 @@ class App(object):
                 menus.SEPARATOR,
                 ('Quit', 'ctrl+q', self.quit),
             ]
+        if name == 'File':
+            return self.open_documents()
         if name == 'View':
             return [
                 (tick(self.show_term) + 'Terminal panel', 'ctrl+j',
