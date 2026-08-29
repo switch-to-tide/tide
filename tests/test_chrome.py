@@ -468,6 +468,21 @@ class TestTheMenus(unittest.TestCase):
         top = ''.join(c[0] or ' ' for c in self.app.screen.cells[0])
         self.assertNotIn('Editor', top)
 
+    def test_the_menus_stay_put_with_the_explorer_closed(self):
+        before = list(self.app.menu_spans)
+        self.app.show_tree = False
+        self.app.render()
+        self.assertEqual(self.app.menu_spans, before,
+                         'the menus moved when the explorer closed')
+        menu = self.open_menu('View')
+        self.assertIsNotNone(menu, 'the menus stopped opening')
+        row = ''.join(c[0] or ' ' for c in self.app.screen.cells[0])
+        self.assertIn('Tide', row)
+        for x1, x2, _name in self.app.menu_spans:
+            for start, end, _view in self.app.toggle_spans:
+                self.assertFalse(start < x2 and x1 < end,
+                                 'a tab sits under a menu name')
+
     def test_it_skips_the_separators(self):
         menu = self.open_menu('Tide')
         seen = set()

@@ -6,6 +6,14 @@ Versions are tagged in git as `v0.1.0` and so on, and the installer takes one:
 curl -fsSL https://raw.githubusercontent.com/switch-to-tide/tide/main/install.sh | sh -s -- 0.1.0
 ```
 
+## 0.1.21 — 2026-08-29
+
+- The menus keep the top left corner to themselves. With the explorer closed
+  the row belonged to the editor and terminal tabs, but the menus were still
+  listening underneath them, so a click on a tab dropped a menu open. Tide,
+  View and Help now sit in the same three places whether the explorer is
+  showing or not, and everything else in that row starts after them.
+
 ## 0.1.20 — 2026-08-29
 
 - The change markers down the scrollbar are as tall as the change they mark:

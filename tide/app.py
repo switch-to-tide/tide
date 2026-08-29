@@ -990,7 +990,10 @@ class App(object):
         r = self.layout()
         scr.clear(bg=theme.BG)
         cursor = None
-        if chrome.boxed():
+        if chrome.boxed() and r['sidebar']:
+            # with the explorer up, the menus have the top row above it to
+            # themselves; without it the switch row draws them, in the same
+            # place, rather than being painted over them
             self.render_menu_bar(scr, scr.width)
         if self.review is not None:
             return self.render_review(scr, r)
@@ -1132,7 +1135,9 @@ class App(object):
         scr.fill(rect.x, rect.y, rect.w, 1, bg=theme.PANEL)
         self.toggle_spans = []
         x = rect.x + 1
-        if not chrome.boxed():       # classic has the explorer header up here
+        if not chrome.boxed() or rect.x == 0:
+            # the menus belong at the very top left whatever else is showing,
+            # so when nothing is to the left of this row they go in it
             self.menu_spans, x = menus.MenuBar.render(scr, rect, self.menu_open)
             x += 1
         if not self.split:           # in split view both are already on screen
