@@ -328,6 +328,15 @@ Requires Python 3.7+ and a terminal that speaks xterm mouse reporting
 - Every window — each editor tab, each full-size session, the docked panel —
   scrolls independently and keeps its position when you switch away and back.
 
+**Menus**
+- `Tide`, `View` and `Help` sit at the top left. Tide holds the settings,
+  **Open File...** and quit; View shows and hides the panes and opens the git
+  review, with a tick beside whatever is on; Help is the shortcut list.
+- **Open File...** browses the whole machine — folders first, `..` to go up,
+  a letter jumps to the next name starting with it. Whatever you open is
+  opened like anything else, and a file from outside the project wears its
+  name in italics.
+
 **Panels**
 - `ctrl+l`, or the **↻** button in the top right, paints the whole screen
   again: it opens and closes nothing, it simply stops believing what it
@@ -425,7 +434,7 @@ running whether or not they are on screen.
 ## Tests
 
 ```sh
-python3 tests/run_all.py       # 721 tests, ~5 min
+python3 tests/run_all.py       # 741 tests, ~5 min
 python3 tests/test_units.py    # editing core, instant
 python3 tests/test_saving.py   # what lands on disk, instant
 python3 tests/test_durability.py   # quick exits, signals, lost terminals

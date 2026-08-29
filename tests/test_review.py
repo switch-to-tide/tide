@@ -78,8 +78,9 @@ class ReviewTest(unittest.TestCase):
         return row[app.rects['editor'].x:].rstrip()
 
     def side(self, app, y):
-        row = ''.join(c[0] or ' ' for c in app.screen.cells[y])
-        return row[:app.rects['sidebar'].w].rstrip()
+        side = app.rects['sidebar']
+        row = ''.join(c[0] or ' ' for c in app.screen.cells[side.y + y])
+        return row[side.x:side.x2].rstrip()
 
     def heading_row(self, name):
         rect = self.a.rects['editor']
@@ -346,13 +347,17 @@ class TestGettingInAndOut(ReviewTest):
         app.handle_mouse(Mouse('press', span[0] + 1, app.rects['switch'].y))
         self.assertIsNone(app.review)
 
-    def test_the_button_in_the_top_bar_opens_it(self):
+    def test_the_view_menu_opens_it(self):
         self.change_everything()
         app = self.app()
         app.render()
-        self.assertIsNotNone(app.review_span, 'no review button in a repository')
-        app.handle_mouse(Mouse('press', app.review_span[0] + 1,
-                               app.rects['switch'].y))
+        span = next(s for s in app.menu_spans if s[2] == 'View')
+        app.handle_mouse(Mouse('press', span[0] + 1, 0))
+        app.render()                       # the dropdown learns where it is
+        menu = app.overlay
+        i = next(i for i, item in enumerate(menu.items)
+                 if item and 'Git review' in item[0])
+        app.handle_mouse(Mouse('press', menu.rect.x + 2, menu.rect.y + 1 + i))
         self.assertIsNotNone(app.review)
 
     def test_split_view_is_put_aside_and_given_back(self):

@@ -241,8 +241,9 @@ class TestTheTab(AudioTest):
 
     def test_the_tab_looks_like_any_other(self):
         app, _view = self.open()
+        y = app.rects['tabs'].y
         self.assertIn('tone.wav', ''.join(c[0] or ' '
-                                          for c in app.screen.cells[1]))
+                                          for c in app.screen.cells[y]))
 
     def test_text_files_are_unaffected(self):
         app = self.app()
@@ -482,7 +483,8 @@ class TestWhenTheFileGoesAway(AudioTest):
         from tide import theme
         self.assertEqual(mark[1], theme.ERROR)
         app.render()
-        strip = ''.join(c[0] or ' ' for c in app.screen.cells[1])
+        y = app.rects['tabs'].y
+        strip = ''.join(c[0] or ' ' for c in app.screen.cells[y])
         self.assertIn('!', strip, 'no mark on the tab itself')
         view.close()
 
@@ -829,7 +831,12 @@ class TestThePipeline(unittest.TestCase):
 
 
 class TestStress(AudioTest):
+    def temp_files(self):
+        return set(f for f in os.listdir(tempfile.gettempdir())
+                   if f.startswith('tide-play-') or f.startswith('tide-kept-'))
+
     def test_a_hundred_starts_and_stops_leak_nothing(self):
+        was_there = self.temp_files()
         app = self.app()
         view = app.open_file(self.tone)
         before = open_fds()
@@ -841,10 +848,9 @@ class TestStress(AudioTest):
         view.player.stop()
         time.sleep(0.3)
         self.assertLessEqual(open_fds(), before + 4, 'file handles are leaking')
-        leftovers = [f for f in os.listdir(tempfile.gettempdir())
-                     if f.startswith('tide-play-') or f.startswith('tide-kept-')]
+        leftovers = self.temp_files() - was_there
         view.close()
-        self.assertEqual(leftovers, [], 'temporary files are piling up')
+        self.assertEqual(leftovers, set(), 'temporary files are piling up')
 
     def test_opening_and_closing_many_tabs(self):
         app = self.app()
@@ -925,6 +931,7 @@ class TestStress(AudioTest):
         self.assertIsNotNone(process.poll(), 'the sound outlived the editor')
 
     def test_deleting_the_file_a_hundred_times_over(self):
+        was_there = self.temp_files()
         app = self.app()
         view = app.open_file(self.tone)
         for _ in range(25):
@@ -936,10 +943,9 @@ class TestStress(AudioTest):
             self.assertFalse(view.missing)
         app.render()
         self.assertNotIn('Traceback', self.painted(app))
-        leftovers = [f for f in os.listdir(tempfile.gettempdir())
-                     if f.startswith('tide-kept-')]
+        leftovers = self.temp_files() - was_there
         view.close()
-        self.assertEqual(leftovers, [], 'kept copies are piling up')
+        self.assertEqual(leftovers, set(), 'kept copies are piling up')
 
 
 SPEEDS_SEEN = [0.5, 1.0, 1.25, 1.5, 2.0]

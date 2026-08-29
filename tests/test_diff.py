@@ -599,17 +599,26 @@ class TestDiffInTheUI(unittest.TestCase):
                          'the left half moved too')
         self.assertIn('col ', self.s.screen())
 
+    def numbers(self, row):
+        """The line number each half is showing on a row."""
+        halves = self.s.line(row).split('|')
+        out = []
+        for half in halves[:2]:
+            digits = [w for w in half.replace('│', ' ').split() if w.isdigit()]
+            out.append(digits[0] if digits else '')
+        return (out + ['', ''])[:2]
+
     def test_vertical_scrolling_keeps_the_halves_together(self):
         self.s.key(F8)
         self.s.pump(0.8)
-        top_row = 3
-        self.assertEqual(self.s.line(top_row)[26:31].strip(),
-                         self.s.line(top_row)[63:68].strip(),
+        top_row = self.s.BODY_ROW + 1        # past the two halves' headings
+        left, right = self.numbers(top_row)
+        self.assertEqual(left, right,
                          'the two halves start on different lines')
         self.s.hwheel(35, top_row, right=True, times=2)   # offset one half
         self.s.wheel(50, top_row, up=False, times=2)      # then scroll down
-        self.assertEqual(self.s.line(top_row)[26:31].strip(),
-                         self.s.line(top_row)[63:68].strip(),
+        left, right = self.numbers(top_row)
+        self.assertEqual(left, right,
                          'the halves drifted apart vertically')
 
     def test_the_conflict_prompt_offers_a_diff(self):

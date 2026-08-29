@@ -479,7 +479,7 @@ class TestScrolling(IDETest):
 
     def editor_top(self):
         """The first real text line the editor is showing."""
-        for line in self.s.text()[2:16]:
+        for line in self.s.text()[self.s.BODY_ROW:16]:
             text = line[26:].strip()
             if text and not text.startswith('~'):
                 return text
@@ -562,17 +562,19 @@ class TestScrolling(IDETest):
         self.s.type('for i in $(seq 1 60); do echo ONE_$i; done' + ENTER)
         self.assertTrue(self.s.wait_for('ONE_60'))
         self.s.wheel(60, 8, up=True, times=4)
-        first = [l[26:].strip() for l in self.s.text()[2:6]]
+        top = self.s.BODY_ROW
+        first = [l[26:].strip() for l in self.s.text()[top:top + 4]]
         self.s.key(F4)                       # a second session, at its own bottom
         self.s.type('for i in $(seq 1 60); do echo TWO_$i; done' + ENTER)
         self.assertTrue(self.s.wait_for('TWO_60'))
-        second = [l[26:].strip() for l in self.s.text()[2:6]]
+        second = [l[26:].strip() for l in self.s.text()[top:top + 4]]
         self.assertNotEqual(first, second)
         self.s.click_tab('sh')
-        self.assertEqual([l[26:].strip() for l in self.s.text()[2:6]], first,
-                         'session 1 lost its scrollback position')
+        self.assertEqual([l[26:].strip() for l in self.s.text()[top:top + 4]],
+                         first, 'session 1 lost its scrollback position')
         self.s.click_tab('sh 2')
-        self.assertEqual([l[26:].strip() for l in self.s.text()[2:6]], second)
+        self.assertEqual([l[26:].strip() for l in self.s.text()[top:top + 4]],
+                         second)
 
 
 class TestScrollbar(IDETest):
@@ -585,13 +587,38 @@ class TestScrollbar(IDETest):
         with open(os.path.join(self.tmp, 'wide.txt'), 'w') as f:
             f.write(('W' * 300 + '\n') * 200)
 
+    def bar_column(self):
+        """Which column the scrollbar is in, whatever the pane is framed with."""
+        from tide import theme
+        theme.apply('dark', 'modern')
+        wanted = (theme.SCROLL_TRACK, theme.SCROLL_THUMB, theme.SCROLL_THUMB_HL)
+        top, bottom = self.s.BODY_ROW, self.s.find('TERMINAL')[1] - 2
+        best, where = 0, self.cols - 1
+        for x in range(self.cols - 1, self.cols - 5, -1):
+            marks = sum(1 for y in range(top, bottom)
+                        if self.s.cell(x, y)[2] in wanted)
+            if marks > best:
+                best, where = marks, x
+        return where
+
     def bar(self):
-        """The scrollbar column as a picture: # thumb, | track, . nothing."""
-        x = self.cols - 1
+        """The scrollbar column as a picture: # thumb, | track, . nothing.
+
+        Which column it is depends on the appearance - a boxed pane keeps a
+        border and a margin to the right of it - so the column is found by
+        looking for the track rather than assumed.
+        """
+        from tide import theme
+        theme.apply('dark', 'modern')          # what a session comes up as
+        thumbs = (theme.SCROLL_THUMB, theme.SCROLL_THUMB_HL)
+        track = theme.SCROLL_TRACK
+        top = self.s.BODY_ROW
+        bottom = self.s.find('TERMINAL')[1] - (2 if self.s.BOXED else 0)
+        x = self.bar_column()
         out = []
-        for y in range(2, self.s.find('TERMINAL')[1]):
+        for y in range(top, bottom):
             bg = self.s.cell(x, y)[2]
-            out.append('#' if bg in (243, 250) else ('|' if bg == 237 else '.'))
+            out.append('#' if bg in thumbs else ('|' if bg == track else '.'))
         return ''.join(out)
 
     def open_long(self):
@@ -624,19 +651,23 @@ class TestScrollbar(IDETest):
 
     def test_clicking_the_track_jumps(self):
         self.open_long()
-        x = self.cols - 1
-        self.s.click(x, 7)
-        first = self.s.text()[2][26:40].strip()
-        self.assertTrue(first.startswith('1'), 'expected to jump into the file: %r' % first)
+        x = self.bar_column()
+        self.s.click(x, self.s.BODY_ROW + 5)
+        row = self.s.text()[self.s.BODY_ROW]
+        found = [word for word in row.split()
+                 if word.startswith('L') and word[1:].isdigit()]
+        self.assertTrue(found, 'expected to jump into the file: %r' % row)
+        self.assertNotEqual(int(found[0][1:]), 0, 'it did not move')
         self.assertNotEqual(self.bar().index('#'), 0)
 
     def test_dragging_the_thumb_reaches_both_ends(self):
         self.open_long()
-        x = self.cols - 1
-        bottom_row = self.s.find('TERMINAL')[1] - 1
-        self.s.drag(x, 2, x, bottom_row)
+        x = self.bar_column()
+        bottom_row = self.s.find('TERMINAL')[1] - (3 if self.s.BOXED else 1)
+        top_row = self.s.BODY_ROW
+        self.s.drag(x, top_row, x, bottom_row)
         self.assertIn('L391', self.s.screen(), 'drag to the end should show the last lines')
-        self.s.drag(x, bottom_row, x, 2)
+        self.s.drag(x, bottom_row, x, top_row)
         self.assertIn('1 L0', self.s.screen())
 
     def test_the_bar_does_not_sit_on_the_text(self):
@@ -644,9 +675,15 @@ class TestScrollbar(IDETest):
         self.s.type('wide')
         self.s.key(ENTER)
         self.s.pump(0.5)
-        x = self.cols - 1
-        self.assertEqual(self.s.cell(x, 3)[2], 237, 'the bar column should be track')
-        self.assertEqual(self.s.cell(x - 1, 3)[0], 'W', 'text should run up to the bar')
+        from tide import theme
+        theme.apply('dark', 'modern')
+        x = self.bar_column()
+        self.assertIn(self.s.cell(x, self.s.BODY_ROW)[2],
+                      (theme.SCROLL_TRACK, theme.SCROLL_THUMB,
+                       theme.SCROLL_THUMB_HL),
+                      'the bar column should be the bar')
+        self.assertEqual(self.s.cell(x - 1, self.s.BODY_ROW)[0], 'W',
+                         'text should run up to the bar')
 
     def test_no_scrollbar_in_a_full_size_terminal(self):
         self.s.key(F2)

@@ -14,11 +14,12 @@ from .diff import DiffView, buffer_source, disk_source, head_source, rev_source
 from .filetree import FileTree, IGNORE_DIRS, IGNORE_FILES
 from .git import Git
 from . import chrome
+from . import menu as menus
 from . import names as tabnames
 from .keys import ALT, CTRL, SHIFT, Decoder, Key, Mouse, Paste
 from .review import Review
 from .overlay import Confirm, Help, Prompt, SettingsPanel
-from .term import BOLD, DIM, RawTerminal, Rect, Screen
+from .term import BOLD, DIM, ITALIC, RawTerminal, Rect, Screen
 from .termpanel import TerminalPanel
 
 SIDEBAR_W = 26
@@ -76,6 +77,10 @@ class App(object):
         self._tree_indicator = False
         self.review = None           # the git review, when it is on screen
         self._review_focus = None    # what had the keyboard before it opened
+        self.menu_open = None        # which menu is down, if any
+        self._splitter_hold = 0      # where on the divider a drag took hold
+        self._main_w = 80            # width the layout last gave the panes
+        self.menu_spans = []
         self._seen_tab = None        # the tab in front of us, and the one
         self._prev_tab = None        # before it, in each of the two groups
         self._seen_term = None
@@ -660,6 +665,7 @@ class App(object):
                 return
             self.save(ed, target)
         self.overlay = Prompt('Save as:', text=start, on_accept=accept)
+        self.need_render = True   # show it at once
 
     # ---------------- full-size terminals ----------------
     def big_term(self):
@@ -677,9 +683,10 @@ class App(object):
         if not self.split or not self.big_terms:
             return False
         if main_w is None:
-            rect = self.rects.get('editor')
-            main_w = (rect.w if rect else 80) + (
-                self.rects['split'].w + 1 if self.rects.get('split') else 0)
+            # what the layout last had to work with: reconstructing it from
+            # the panes under-counts whatever the frame took, and then this
+            # answers differently depending on who asks
+            main_w = self._main_w
         return main_w >= 60
 
     def toggle_split(self):
@@ -943,6 +950,7 @@ class App(object):
                  'sidebar': Rect(0, 0, sw, content_h) if sw else None}
         main_x = sw
         main_w = w - sw
+        self._main_w = main_w
         rects['switch'] = Rect(main_x, 0, main_w, 1)
         rects['tabs'] = Rect(main_x, 1, main_w, 1)
         body_h = content_h - 2
@@ -977,6 +985,8 @@ class App(object):
         r = self.layout()
         scr.clear(bg=theme.BG)
         cursor = None
+        if chrome.boxed():
+            self.render_menu_bar(scr, scr.width)
         if self.review is not None:
             return self.render_review(scr, r)
         if r['sidebar']:
@@ -1106,11 +1116,20 @@ class App(object):
         self.need_render = True
         return True
 
+    def render_menu_bar(self, scr, width):
+        """The menus, across the very top - where the boxes leave room."""
+        row = Rect(0, 0, width, 1)
+        scr.fill(0, 0, width, 1, bg=theme.PANEL)
+        self.menu_spans, _end = menus.MenuBar.render(scr, row, self.menu_open)
+
     def render_switch(self, scr, rect):
-        """The row above the tabs: what the main area is showing."""
+        """The row above the tabs: the menus, then what the main area shows."""
         scr.fill(rect.x, rect.y, rect.w, 1, bg=theme.PANEL)
         self.toggle_spans = []
         x = rect.x + 1
+        if not chrome.boxed():       # classic has the explorer header up here
+            self.menu_spans, x = menus.MenuBar.render(scr, rect, self.menu_open)
+            x += 1
         if not self.split_active():
             # in split view both sets of tabs are on screen, so there is
             # nothing to switch between
@@ -1133,13 +1152,9 @@ class App(object):
         self.new_term_span = None
         self.diff_spans = []
         cx = rect.x2
-        cx, self.settings_span = self._chip(scr, rect, cx, x, ' settings ',
-                                            theme.TAB_MARK)
+        # settings and review live in the menus now
         cx, self.repaint_span = self._chip(scr, rect, cx, x, ' \u21bb ',
                                            theme.FG_DIM)
-        if self.git.enabled:
-            cx, self.review_span = self._chip(scr, rect, cx, x, ' review ',
-                                              theme.GIT_LINE_ADDED)
         # in split view with nothing to split with, offer to start a shell
         if self.split and not self.big_terms:
             cx, self.new_term_span = self._chip(scr, rect, cx, x, ' </> ',
@@ -1178,15 +1193,29 @@ class App(object):
         self.plus_span = None
         divider = self.rects.get('divider')
         if self.split_active() and divider is not None:
-            self._render_strip(scr, Rect(rect.x, rect.y, divider - rect.x, 1), 'editor')
-            self._render_strip(scr, Rect(divider + 1, rect.y, rect.x2 - divider - 1, 1),
-                               'terminal')
+            left = self.rects.get('tabs_left') or \
+                Rect(rect.x, rect.y, divider - rect.x, 1)
+            right = self.rects.get('tabs_right') or \
+                Rect(divider + 1, rect.y, rect.x2 - divider - 1, 1)
+            self._render_strip(scr, left, 'editor')
+            self._render_strip(scr, right, 'terminal')
             if not chrome.boxed():     # the boxes already keep them apart
                 scr.fill(divider, rect.y, 1, 1, bg=theme.PANEL)
                 scr.put(divider, rect.y, '|', fg=theme.BORDER, bg=theme.PANEL)
         else:
             self._render_strip(
                 scr, rect, 'terminal' if self.main_is_terminal() else 'editor')
+
+    def outside_project(self, path):
+        """Whether a file lives somewhere other than under the project root."""
+        if not path:
+            return False
+        try:
+            root = os.path.realpath(self.root)
+            here = os.path.realpath(path)
+        except OSError:
+            return False
+        return os.path.relpath(here, root).startswith('..')
 
     def editor_titles(self):
         """Tab names: the file, plus folders where two of them share a name."""
@@ -1232,12 +1261,16 @@ class App(object):
         focused = self.main_is_terminal() == terminals
         if terminals:
             names = self.terminal_titles()
+            styles = [0] * len(names)
             active_i = self.big_active
             marks = [False] * len(names)
         else:
             names = self.editor_titles()
             active_i = self.active
             marks = [ed.doc.dirty for ed in self.editors]
+            # a file from outside the project is named in italics
+            styles = [ITALIC if self.outside_project(getattr(ed, 'path', None))
+                      else 0 for ed in self.editors]
         # ' name* M x ' - the marker and git slots keep their width so that
         # tabs never jump about as files change underneath them
         marks_git = self.tab_git_marks() if not terminals else [None] * len(names)
@@ -1276,7 +1309,9 @@ class App(object):
             left = max(rect.x, tx)
             if tx + widths[i] > rect.x and tx < rect.x2:
                 scr.fill(left, rect.y, min(tx + widths[i], rect.x2) - left, 1, bg=bg)
-                scr.put(tx, rect.y, label, fg=fg, bg=bg, attr=BOLD if active else 0,
+                attr = (BOLD if active else 0) | (styles[i] if i < len(styles)
+                                                  else 0)
+                scr.put(tx, rect.y, label, fg=fg, bg=bg, attr=attr,
                         max_x=rect.x2, min_x=rect.x)
                 if gap:
                     letter, colour = marks_git[i] or (None, None)
@@ -1403,6 +1438,20 @@ class App(object):
             self.focus = order[(i + (-1 if back else 1)) % len(order)]
         self.need_render = True
 
+    def toggle_terminal_visible(self):
+        """Show or hide the docked shell.
+
+        ctrl+j has two stages - show and focus, then hide - which is what you
+        want from a key you press twice a minute. A menu with a tick beside it
+        should just be the tick.
+        """
+        self.show_term = not self.show_term
+        if self.show_term:
+            self.focus = 'terminal'
+        elif self.focus == 'terminal':
+            self.focus = 'editor'
+        self.need_render = True
+
     def toggle_terminal(self):
         if not self.show_term:
             self.show_term = True
@@ -1448,6 +1497,7 @@ class App(object):
             if text:
                 self.open_file(os.path.abspath(os.path.expanduser(text)))
         self.overlay = Prompt('Path:', text='', on_accept=accept)
+        self.need_render = True   # show it at once
 
     def prompt_find(self):
         ed = self.text_editor()
@@ -1475,6 +1525,7 @@ class App(object):
 
         self.overlay = Prompt('Find:', text=initial, on_accept=accept, on_change=change,
                               on_cancel=cancel)
+        self.need_render = True   # show it at once
         if initial:
             change(initial)
 
@@ -1492,6 +1543,7 @@ class App(object):
             ed.refresh_find()
             self.status('Replaced %d occurrence(s)' % len(matches))
         self.overlay = Prompt('Replace "%s" with:' % query, on_accept=accept)
+        self.need_render = True   # show it at once
 
     def prompt_goto(self):
         ed = self.text_editor()
@@ -1508,6 +1560,7 @@ class App(object):
             ed.top = max(0, n - 1 - ed.text_rect.h // 2)
         self.overlay = Prompt('Go to line:', on_accept=accept,
                               info='1-%d' % len(ed.doc.lines))
+        self.need_render = True   # show it at once
 
     # ---------------- events ----------------
     def handle_key(self, key):
@@ -1662,6 +1715,12 @@ class App(object):
                 self.overlay = None
             return
         r = self.rects or self.layout()
+        if ev.y == 0 and not self.mouse_capture:
+            for x1, x2, name in self.menu_spans:     # the bar across the top
+                if x1 <= ev.x < x2:
+                    if ev.kind == 'press':
+                        self.open_menu(name, x1)
+                    return
         if self.review is not None and not self.mouse_capture:
             if self.review_mouse(ev, r):
                 return
@@ -1674,7 +1733,8 @@ class App(object):
             if target == 'splitter':
                 if ev.kind == 'drag':
                     body_bottom = r['status'].y
-                    self.term_h = max(MIN_TERM_H, body_bottom - ev.y)
+                    self.term_h = max(MIN_TERM_H,
+                                      body_bottom - (ev.y - self._splitter_hold))
                     self.term_h_user_set = True
                 return
             if target == 'vsplitter':
@@ -1708,12 +1768,17 @@ class App(object):
                 and ev.x >= r['terminal'].x:
             if ev.kind == 'press':
                 self.mouse_capture = 'splitter'
+                self._splitter_hold = 0      # grabbed by the border itself
                 self.focus = 'terminal'
             return
         if r['terminal'] and r['terminal'].contains(ev.x, ev.y):
             if ev.y == r['terminal'].y:  # header = splitter
                 if ev.kind == 'press':
                     self.mouse_capture = 'splitter'
+                    # the row grabbed is the row that follows the pointer,
+                    # whether that is the box's border or the header inside it
+                    self._splitter_hold = ev.y - (grab if grab is not None
+                                                  else ev.y)
                     self.focus = 'terminal'
                 return
             if ev.kind == 'press':
@@ -1822,7 +1887,83 @@ class App(object):
         if self.review.on_key(key):
             self.need_render = True
 
+    def open_menu(self, name, x=None):
+        """Drop one of the menus open under its name."""
+        if self.menu_open == name:
+            self.menu_open = None
+            self.overlay = None
+            self.need_render = True
+            return
+        items = self.menu_items(name)
+        if items is None:
+            self.menu_open = None
+            self.overlay = None
+            self.overlay = Help()          # Help is the shortcut list itself
+            self.need_render = True
+            return
+        if x is None:
+            x = next((s[0] for s in self.menu_spans if s[2] == name), 1)
+        self.menu_open = name
+        self.overlay = menus.Dropdown(self, name, x, self.rects['switch'].y + 1,
+                                      items)
+        self.need_render = True
+
+    def open_menu_beside(self, name, delta):
+        """Left and right walk along the bar, as menus do everywhere."""
+        order = [span[2] for span in self.menu_spans] or list(menus.NAMES)
+        if name not in order:
+            return
+        self.menu_open = None
+        self.open_menu(order[(order.index(name) + delta) % len(order)])
+
+    def menu_items(self, name):
+        """What each menu offers. None means it is a button, not a menu."""
+        tick = menus.tick
+        if name == 'Tide':
+            return [
+                ('Settings...', 'f9', self.open_settings),
+                menus.SEPARATOR,
+                ('Open File...', 'ctrl+o', self.browse_files),
+                menus.SEPARATOR,
+                ('Quit', 'ctrl+q', self.quit),
+            ]
+        if name == 'View':
+            return [
+                (tick(self.show_term) + 'Terminal panel', 'ctrl+j',
+                 self.toggle_terminal_visible),
+                (tick(self.split) + 'Split view', 'f5', self.toggle_split),
+                (tick(self.show_tree) + 'Explorer', 'f12', self.toggle_tree),
+                menus.SEPARATOR,
+                ('Git review', 'f10', self.open_review),
+            ]
+        return None
+
+    def browse_files(self):
+        """Open File...: look around the machine and pick one."""
+        from .browser import FileBrowser
+        here = self.editor.path if getattr(self.editor, 'path', None) else None
+        self.overlay = FileBrowser(self, os.path.dirname(here) if here
+                                   else self.root)
+        self.need_render = True
+
+    def rel_folder(self, path):
+        """A folder to show in a title: short if it is under the project."""
+        try:
+            short = os.path.relpath(path, self.root)
+        except ValueError:
+            return path
+        if short == '.':
+            return os.path.basename(self.root) or self.root
+        if not short.startswith('..'):
+            return short
+        home = os.path.expanduser('~')
+        return ('~' + path[len(home):]) if path.startswith(home) else path
+
     def _click_switch(self, ev):
+        for x1, x2, name in self.menu_spans:
+            if x1 <= ev.x < x2:
+                self.open_menu(name, x1)
+                return
         if self.settings_span and self.settings_span[0] <= ev.x < self.settings_span[1]:
             self.open_settings()
             return

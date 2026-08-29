@@ -151,8 +151,16 @@ class TestTabStrip(unittest.TestCase):
         self.s.close()
         shutil.rmtree(self.tmp, ignore_errors=True)
 
+    def strip_x(self):
+        """Where the tab strip starts, past the explorer and the pane's frame."""
+        line = self.s.line(self.s.TAB_ROW)
+        x = 26
+        while x < len(line) and line[x] in '│ ':
+            x += 1
+        return x
+
     def tabs(self):
-        return self.s.line(self.s.TAB_ROW)[26:]
+        return self.s.line(self.s.TAB_ROW)[self.strip_x():].rstrip().rstrip('│ ')
 
     def test_too_many_tabs_are_cropped_with_an_arrow(self):
         strip = self.tabs()
@@ -177,7 +185,7 @@ class TestTabStrip(unittest.TestCase):
 
     def test_the_arrows_are_clickable(self):
         before = self.tabs()
-        self.s.click(26, self.s.TAB_ROW)          # the '<' at the left edge
+        self.s.click(self.strip_x(), self.s.TAB_ROW)   # the '<' at the left
         self.assertNotEqual(self.tabs(), before)
 
     def test_scrolling_does_not_change_the_active_file(self):
@@ -189,7 +197,8 @@ class TestTabStrip(unittest.TestCase):
         self.s.wheel(60, self.s.TAB_ROW, up=True, times=14)
         strip = self.tabs()
         self.assertIn('beta_helpers.py', strip)
-        self.s.click(26 + strip.index('beta_helpers.py') + 1, self.s.TAB_ROW)
+        self.s.click(self.strip_x() + strip.index('beta_helpers.py') + 1,
+                     self.s.TAB_ROW)
         self.s.pump(0.5)
         self.assertIn('inside beta_helpers.py', self.s.screen())
 
@@ -210,7 +219,8 @@ class TestTabStrip(unittest.TestCase):
         self.s.pump(1.2)
         self.assertIn('sh 6', self.tabs(), 'the terminals are not all there')
         self.s.wheel(60, self.s.TAB_ROW, up=True, times=4)
-        self.assertIn(' sh  x ', self.tabs(), 'the terminal strip did not scroll')
+        self.assertTrue(self.tabs().startswith('sh  x '),
+                        'the terminal strip did not scroll')
         self.s.key(ESC + 'OQ')               # f2, back to the file tabs
         self.s.pump(0.5)
         self.assertNotIn(' sh  x ', self.tabs(), 'the strips share an offset')
@@ -316,6 +326,254 @@ class TestSwitchingBack(unittest.TestCase):
         self.assertEqual(self.here(), 'c.py', 'it moved a file tab as well')
         for term in self.app.big_terms:
             term.stop()
+
+
+class TestTheMenus(unittest.TestCase):
+    """Tide, View and Help across the top, and what they do."""
+
+    def setUp(self):
+        import io
+        from tide.term import Screen
+        self.tmp = tempfile.mkdtemp(prefix='tide-menu-')
+        self.cfg = tempfile.mkdtemp(prefix='tide-menu-cfg-')
+        os.environ['TIDE_CONFIG_HOME'] = self.cfg
+        os.makedirs(os.path.join(self.tmp, 'sub'))
+        for rel in ('a.py', 'sub/deep.py'):
+            with open(os.path.join(self.tmp, *rel.split('/')), 'w') as f:
+                f.write('x = 1\n')
+        self.app = App(root=self.tmp, paths=[], out=io.StringIO())
+        self.app.screen = Screen(100, 24)
+        self.app.show_term = True
+        self.app.open_file(os.path.join(self.tmp, 'a.py'))
+        self.app.render()
+
+    def tearDown(self):
+        os.environ.pop('TIDE_CONFIG_HOME', None)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+        shutil.rmtree(self.cfg, ignore_errors=True)
+
+    def press(self, x, y):
+        from tide.keys import Mouse
+        self.app.handle_mouse(Mouse('press', x, y))
+        self.app.render()
+
+    def open_menu(self, name):
+        span = next(s for s in self.app.menu_spans if s[2] == name)
+        self.press(span[0] + 1, 0)
+        return self.app.overlay
+
+    def pick(self, label):
+        menu = self.app.overlay
+        for i, item in enumerate(menu.items):
+            if item and label in item[0]:
+                self.press(menu.rect.x + 2, menu.rect.y + 1 + i)
+                return
+        raise AssertionError('no %r in the menu' % label)
+
+    def painted(self):
+        return '\n'.join(''.join(c[0] or ' ' for c in row)
+                          for row in self.app.screen.cells)
+
+    def test_the_three_names_are_at_the_top_left(self):
+        top = ''.join(c[0] or ' ' for c in self.app.screen.cells[0])
+        self.assertLess(top.index('Tide'), top.index('View'))
+        self.assertLess(top.index('View'), top.index('Help'))
+        self.assertLess(top.index('Tide'), 4, 'the menus are not at the left')
+
+    def test_the_old_buttons_are_gone_from_the_right(self):
+        top = ''.join(c[0] or ' ' for c in self.app.screen.cells[0])
+        self.assertNotIn('settings', top, 'settings should be in the Tide menu')
+        self.assertNotIn('review', top, 'review should be in the View menu')
+
+    def test_tide_offers_settings_open_and_quit(self):
+        menu = self.open_menu('Tide')
+        labels = [item[0] for item in menu.items if item]
+        self.assertEqual(len(labels), 3)
+        self.assertIn('Settings', labels[0])
+        self.assertIn('Open File', labels[1])
+        self.assertIn('Quit', labels[2])
+
+    def test_view_offers_the_panes_and_the_review(self):
+        menu = self.open_menu('View')
+        labels = [item[0] for item in menu.items if item]
+        self.assertTrue(any('Terminal' in l for l in labels))
+        self.assertTrue(any('Split' in l for l in labels))
+        self.assertTrue(any('Explorer' in l for l in labels))
+        self.assertTrue(any('Git review' in l for l in labels))
+
+    def test_the_ticks_follow_what_is_showing(self):
+        menu = self.open_menu('View')
+        showing = [item[0] for item in menu.items if item and '✓' in item[0]]
+        self.assertTrue(any('Terminal' in l for l in showing))
+        self.assertTrue(any('Explorer' in l for l in showing))
+        self.assertFalse(any('Split' in l for l in showing))
+
+    def test_settings_opens_from_the_menu(self):
+        from tide.overlay import SettingsPanel
+        self.open_menu('Tide')
+        self.pick('Settings')
+        self.assertIsInstance(self.app.overlay, SettingsPanel)
+
+    def test_help_is_the_shortcut_list_itself(self):
+        from tide.overlay import Help
+        self.open_menu('Help')
+        self.assertIsInstance(self.app.overlay, Help)
+
+    def test_the_view_items_toggle_what_they_say(self):
+        self.open_menu('View')
+        self.pick('Terminal panel')
+        self.assertFalse(self.app.show_term)
+        self.open_menu('View')
+        self.pick('Terminal panel')
+        self.assertTrue(self.app.show_term)
+        self.open_menu('View')
+        self.pick('Explorer')
+        self.assertFalse(self.app.show_tree)
+
+    def test_clicking_the_name_again_closes_it(self):
+        self.open_menu('Tide')
+        self.assertIsNotNone(self.app.overlay)
+        self.open_menu('Tide')
+        self.assertIsNone(self.app.overlay)
+        self.assertIsNone(self.app.menu_open)
+
+    def test_escape_closes_it(self):
+        from tide.keys import Key
+        self.open_menu('View')
+        self.app.handle_key(Key('escape'))
+        self.assertIsNone(self.app.overlay)
+
+    def test_the_keyboard_walks_the_items(self):
+        from tide.keys import Key
+        menu = self.open_menu('View')
+        first = menu.index
+        self.app.handle_key(Key('down'))
+        self.assertNotEqual(menu.index, first)
+        self.app.handle_key(Key('up'))
+        self.assertEqual(menu.index, first)
+
+    def test_it_skips_the_separators(self):
+        menu = self.open_menu('Tide')
+        seen = set()
+        for _ in range(6):
+            seen.add(menu.index)
+            menu.move(1)
+        self.assertTrue(all(menu.items[i] is not None for i in seen),
+                        'the keyboard landed on a separator')
+
+
+class TestOpenFileBrowser(unittest.TestCase):
+    """Open File...: a look around, ending in a file opened as any other."""
+
+    def setUp(self):
+        import io
+        from tide.term import Screen
+        self.project = tempfile.mkdtemp(prefix='tide-browse-')
+        self.elsewhere = tempfile.mkdtemp(prefix='tide-outside-')
+        os.makedirs(os.path.join(self.project, 'sub'))
+        for path, text in ((('a.py',), 'inside = 1\n'),
+                           (('sub', 'deep.py'), 'deep = 1\n')):
+            with open(os.path.join(self.project, *path), 'w') as f:
+                f.write(text)
+        with open(os.path.join(self.elsewhere, 'far.py'), 'w') as f:
+            f.write('far = 1\n')
+        self.cfg = tempfile.mkdtemp(prefix='tide-browse-cfg-')
+        os.environ['TIDE_CONFIG_HOME'] = self.cfg
+        self.app = App(root=self.project, paths=[], out=io.StringIO())
+        self.app.screen = Screen(100, 24)
+        self.app.show_term = False
+        self.app.render()
+
+    def tearDown(self):
+        os.environ.pop('TIDE_CONFIG_HOME', None)
+        for folder in (self.project, self.elsewhere, self.cfg):
+            shutil.rmtree(folder, ignore_errors=True)
+
+    def browser(self):
+        self.app.browse_files()
+        self.app.render()
+        return self.app.overlay
+
+    def names(self, browser):
+        return [name for name, _is_dir in browser.entries]
+
+    def test_it_lists_folders_first_and_offers_the_way_up(self):
+        b = self.browser()
+        self.assertEqual(self.names(b)[:2], ['..', 'sub'])
+        self.assertIn('a.py', self.names(b))
+
+    def test_it_goes_in_and_out_of_folders(self):
+        b = self.browser()
+        b.index = self.names(b).index('sub')
+        b.enter()
+        self.assertIn('deep.py', self.names(b))
+        b.index = 0                                  # ..
+        b.enter()
+        self.assertIn('a.py', self.names(b))
+
+    def test_opening_a_file_closes_it_and_opens_the_file(self):
+        b = self.browser()
+        b.index = self.names(b).index('a.py')
+        b.enter()
+        self.assertIsNone(self.app.overlay)
+        self.assertEqual(self.app.editors[self.app.active].title, 'a.py')
+
+    def test_a_file_from_anywhere_behaves_like_any_other(self):
+        b = self.browser()
+        b.folder = self.elsewhere
+        b.read()
+        b.index = self.names(b).index('far.py')
+        b.enter()
+        editor = self.app.editors[self.app.active]
+        self.assertEqual(editor.doc.text(), 'far = 1\n')
+        # it is watched, saved and guarded exactly as anything else is
+        editor.doc.cursor = (0, 0)
+        editor.doc.insert('X')
+        editor.doc.save()
+        with open(os.path.join(self.elsewhere, 'far.py')) as f:
+            self.assertEqual(f.read(), 'Xfar = 1\n')
+        with open(os.path.join(self.elsewhere, 'far.py'), 'w') as f:
+            f.write('changed underneath\n')
+        self.app.check_disk_changes(force=True)
+        self.assertEqual(editor.doc.text(), 'changed underneath\n',
+                         'a file from outside is not being watched')
+
+    def test_a_file_from_outside_the_project_is_named_in_italics(self):
+        from tide.term import ITALIC
+        b = self.browser()
+        b.folder = self.elsewhere
+        b.read()
+        b.index = self.names(b).index('far.py')
+        b.enter()
+        self.app.open_file(os.path.join(self.project, 'a.py'))
+        self.app.render()
+        row = self.app.screen.cells[self.app.rects['tabs'].y]
+        line = ''.join(c[0] or ' ' for c in row)
+        self.assertTrue(row[line.index('far.py')][3] & ITALIC,
+                        'a file from elsewhere should be in italics')
+        self.assertFalse(row[line.index('a.py')][3] & ITALIC,
+                         'a file in the project should not be')
+
+    def test_escape_leaves_everything_alone(self):
+        from tide.keys import Key
+        before = len(self.app.editors)
+        b = self.browser()
+        b.on_key(Key('escape'))
+        self.assertIsNone(self.app.overlay)
+        self.assertEqual(len(self.app.editors), before)
+
+    def test_a_folder_it_cannot_read_says_so(self):
+        locked = os.path.join(self.project, 'locked')
+        os.makedirs(locked)
+        os.chmod(locked, 0o000)
+        try:
+            b = self.browser()
+            b.folder = locked
+            b.read()
+            self.assertIn('cannot read', b.note)
+            self.app.render()
+        finally:
+            os.chmod(locked, 0o755)
 
 
 if __name__ == '__main__':

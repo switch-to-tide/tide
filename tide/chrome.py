@@ -81,6 +81,7 @@ def arrange(rects):
         right_tabs, out['split'] = _split_tabs(inner(right))
         out['tabs'] = Rect(left_tabs.x, left_tabs.y,
                            right_tabs.x2 - left_tabs.x, 1)
+        out['tabs_left'], out['tabs_right'] = left_tabs, right_tabs
         out['divider'] = right.x - 1
     if terminal is not None:
         box = Rect(terminal.x, terminal.y, max(3, terminal.w - 1), terminal.h)

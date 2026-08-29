@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from harness import CTRL, Session
 from tide.app import App, MIN_SIDEBAR_W, MIN_TERM_H
-from tide import theme
+from tide import chrome, theme
 from tide.term import Screen
 
 
@@ -48,9 +48,12 @@ class PaneTest(unittest.TestCase):
     def column(self, app, x, y0, y1):
         return ''.join(app.screen.cells[y][x][0] or ' ' for y in range(y0, y1))
 
-    def row(self, app, y, width=None):
-        cells = app.screen.cells[y]
-        return ''.join(c[0] or ' ' for c in cells[:width]).rstrip()
+    def row(self, app, n, width=None):
+        """The nth row of the explorer, as text."""
+        side = app.rects['sidebar']
+        cells = app.screen.cells[side.y + n]
+        end = side.x2 if width is None else min(side.x + width, side.x2)
+        return ''.join(c[0] or ' ' for c in cells[side.x:end]).rstrip()
 
 
 class TestTreeScrolling(PaneTest):
@@ -64,7 +67,7 @@ class TestTreeScrolling(PaneTest):
             tree.scroll_to(tree.top + 3)   # keep going long past the end
         self.assertEqual(tree.top, tree.max_top(), 'scrolled past the end')
         app.render()
-        last = self.row(app, app.rects['sidebar'].y2 - 1, 20)
+        last = self.row(app, app.rects['sidebar'].h - 1, 20)
         self.assertIn('f059.txt', last, 'the last file is not on the last row')
 
     def test_a_short_tree_does_not_scroll_at_all(self):
@@ -78,19 +81,21 @@ class TestTreeScrolling(PaneTest):
     def test_the_indicator_appears_while_scrolling_and_then_fades(self):
         self.files(60)
         app = self.app()
-        tree, edge = app.tree, app.rects['sidebar'].x2 - 1
-        quiet = self.column(app, edge, 1, 8)
-        self.assertEqual(quiet, '│' * 7, 'the divider is not drawn')
+        side = app.rects['sidebar']
+        tree, edge = app.tree, side.x2 - 1
+        quiet = self.column(app, edge, side.y + 1, side.y + 8)
+        self.assertEqual(quiet.strip(), '', 'something is drawn down the edge')
         tree.scroll_to(tree.top + 10)
         app.render()
-        thumbs = [y for y in range(1, app.rects['sidebar'].y2)
+        thumbs = [y for y in range(side.y, side.y2)
                   if self.cell(app, edge, y)[2] == theme.SCROLL_THUMB]
         self.assertTrue(thumbs, 'no thumb while scrolling')
         tree.scrolled_at -= 5.0            # as if you had stopped a while ago
         self.assertFalse(tree.indicator_showing())
         app.render()
-        self.assertEqual(self.column(app, edge, 1, 8), '│' * 7,
-                         'the thumb outstayed its welcome')
+        gone = [y for y in range(side.y, side.y2)
+                if self.cell(app, edge, y)[2] == theme.SCROLL_THUMB]
+        self.assertEqual(gone, [], 'the thumb outstayed its welcome')
 
     def test_the_thumb_shrinks_as_the_tree_grows(self):
         self.files(40)
@@ -99,12 +104,15 @@ class TestTreeScrolling(PaneTest):
         app.render()
         edge = app.rects['sidebar'].x2 - 1
         thumb = theme.SCROLL_THUMB
-        short = sum(1 for y in range(1, 23) if self.cell(app, edge, y)[2] == thumb)
+        side = app.rects['sidebar']
+        short = sum(1 for y in range(side.y, side.y2)
+                    if self.cell(app, edge, y)[2] == thumb)
         self.files(200)
         app.tree.refresh()
         app.tree.scroll_to(5)
         app.render()
-        tall = sum(1 for y in range(1, 23) if self.cell(app, edge, y)[2] == thumb)
+        tall = sum(1 for y in range(side.y, side.y2)
+                   if self.cell(app, edge, y)[2] == thumb)
         self.assertLess(tall, short, 'the thumb did not shrink for a longer tree')
 
 
@@ -139,12 +147,12 @@ class TestDividers(PaneTest):
     def test_dragging_the_side_divider_resizes_the_explorer(self):
         self.files(5)
         app = self.app()
-        edge = app.rects['sidebar'].x2 - 1
+        edge = chrome.grab_column(app.rects)
         app.handle_mouse(_press(edge, 6))
         self.assertEqual(app.mouse_capture, 'vsplitter')
         app.handle_mouse(_drag(edge + 12, 6))
         app.render()
-        self.assertEqual(app.rects['sidebar'].w, edge + 13,
+        self.assertEqual(app.sidebar_w, edge + 13,
                          'the explorer did not follow the drag')
         app.handle_mouse(_release(edge + 12, 6))
         self.assertIsNone(app.mouse_capture)
@@ -152,20 +160,20 @@ class TestDividers(PaneTest):
     def test_the_explorer_cannot_be_dragged_away_entirely(self):
         self.files(5)
         app = self.app()
-        app.handle_mouse(_press(app.rects['sidebar'].x2 - 1, 6))
+        app.handle_mouse(_press(chrome.grab_column(app.rects), 6))
         app.handle_mouse(_drag(0, 6))
         app.render()
-        self.assertEqual(app.rects['sidebar'].w, MIN_SIDEBAR_W)
+        self.assertEqual(app.sidebar_w, MIN_SIDEBAR_W)
         app.handle_mouse(_drag(99, 6))
         app.render()
-        self.assertLessEqual(app.rects['sidebar'].w, 100 - 30,
+        self.assertLessEqual(app.sidebar_w, 100 - 30,
                              'the editor was squeezed out')
 
     def test_clicking_the_divider_does_not_select_a_file(self):
         self.files(5)
         app = self.app()
         before = app.tree.index
-        app.handle_mouse(_press(app.rects['sidebar'].x2 - 1, 3))
+        app.handle_mouse(_press(chrome.grab_column(app.rects), 3))
         self.assertEqual(app.tree.index, before)
 
     def test_dragging_the_terminal_divider_resizes_the_panel(self):
@@ -175,14 +183,16 @@ class TestDividers(PaneTest):
         app.show_term = True
         app.render()
         header = app.rects['terminal'].y
+        before = app.rects['terminal'].h
         app.handle_mouse(_press(50, header))
         self.assertEqual(app.mouse_capture, 'splitter')
         app.handle_mouse(_drag(50, header - 5))
         app.render()
-        self.assertEqual(app.rects['terminal'].h, app.rects['status'].y - header + 5)
+        self.assertEqual(app.rects['terminal'].h, before + 5,
+                         'the panel did not follow the drag')
         app.handle_mouse(_drag(50, app.rects['status'].y + 4))   # past the bottom
         app.render()
-        self.assertGreaterEqual(app.rects['terminal'].h, MIN_TERM_H)
+        self.assertGreaterEqual(app.term_h, MIN_TERM_H)
 
 
 class TestSidewaysScrolling(PaneTest):
@@ -281,11 +291,12 @@ class TestSidewaysInASession(unittest.TestCase):
         for _ in range(60):
             self.s.hwheel(60, 4, right=True, times=1)
         self.s.pump(0.4)
-        far = self.line(3)
+        far = self.line(self.s.BODY_ROW + 1)     # the long line is the second
         for _ in range(20):
             self.s.hwheel(60, 4, right=True, times=1)
         self.s.pump(0.4)
-        self.assertEqual(self.line(3), far, 'kept scrolling into empty space')
+        self.assertEqual(self.line(self.s.BODY_ROW + 1), far,
+                         'kept scrolling into empty space')
         self.assertIn('A', far, 'scrolled somewhere with no text at all')
 
 
@@ -320,7 +331,7 @@ class TestSizesAreRemembered(PaneTest):
         from tide import settings as store
         self.files(4)
         app = self.app()
-        edge = app.rects['sidebar'].x2 - 1
+        edge = chrome.grab_column(app.rects)
         app.handle_mouse(_press(edge, 6))
         app.handle_mouse(_drag(edge + 8, 6))
         app.handle_mouse(_release(edge + 8, 6))
@@ -350,16 +361,17 @@ class TestSizesAreRemembered(PaneTest):
         from tide import settings as store
         self.files(3)
         app = self.app()
-        edge = app.rects['sidebar'].x2 - 1
+        edge = chrome.grab_column(app.rects)
         app.handle_mouse(_press(edge, 6))
         app.handle_mouse(_drag(edge + 5, 6))
         app.handle_mouse(_release(edge + 5, 6))
         first = store.load()['sidebar_width']
         path = store.config_path()
+        self.assertTrue(os.path.exists(path), 'the drag was never written down')
         before = os.path.getmtime(path)
         time.sleep(0.05)
-        app.handle_mouse(_press(app.rects['sidebar'].x2 - 1, 6))
-        app.handle_mouse(_release(app.rects['sidebar'].x2 - 1, 6))
+        app.handle_mouse(_press(chrome.grab_column(app.rects), 6))
+        app.handle_mouse(_release(chrome.grab_column(app.rects), 6))
         self.assertEqual(store.load()['sidebar_width'], first)
         self.assertEqual(os.path.getmtime(path), before,
                          'it wrote the settings again for nothing')
@@ -372,7 +384,7 @@ class TestSizesAreRemembered(PaneTest):
         with open(store.config_path(), 'w') as f:
             f.write('{"sidebar_width": 2, "terminal_height": -9}')
         app = self.app()
-        self.assertGreaterEqual(app.rects['sidebar'].w, MIN_SIDEBAR_W)
+        self.assertGreaterEqual(app.sidebar_w, MIN_SIDEBAR_W)
         self.assertGreater(app.rects['editor'].w, 10)
 
 

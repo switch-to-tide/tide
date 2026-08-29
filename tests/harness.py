@@ -49,6 +49,10 @@ class Session(object):
         fcntl.fcntl(fd, fcntl.F_SETFL, fcntl.fcntl(fd, fcntl.F_GETFL) | os.O_NONBLOCK)
         self.pump(0.8)
         self.wait_for_paint()
+        self.TAB_ROW = self.find_tab_row()
+        # a boxed pane keeps its border and a blank row before the text
+        self.BOXED = '╭' in self.line(1)
+        self.BODY_ROW = self.TAB_ROW + (2 if self.BOXED else 1)
 
     def wait_for_paint(self, timeout=5.0):
         """Wait for a complete first frame.
@@ -136,9 +140,19 @@ class Session(object):
     def cell(self, x, y):
         return self.vt.grid[y][x]
 
-    # -- header rows (the view switch sits above the tab row)
+    # -- header rows. The switch is the top row; the tabs are the row under
+    # it, or two under it in the boxed appearance where the pane's border
+    # comes first. Found once, after the first paint, so a test never has to
+    # know which appearance it is looking at.
     SWITCH_ROW = 0
     TAB_ROW = 1
+
+    def find_tab_row(self):
+        for y in (1, 2, 3):
+            line = self.line(y) if y < len(self.text()) else ''
+            if ' x ' in line or line.rstrip().endswith(' + ') or ' x' in line:
+                return y
+        return 1
 
     def tab_pos(self, label):
         """x of a tab label in the tab row (rightmost match clears the sidebar)."""

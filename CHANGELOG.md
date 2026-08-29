@@ -6,7 +6,26 @@ Versions are tagged in git as `v0.1.0` and so on, and the installer takes one:
 curl -fsSL https://raw.githubusercontent.com/switch-to-tide/tide/main/install.sh | sh -s -- 0.1.0
 ```
 
-## 0.1.18 — unreleased
+## 0.1.19 — unreleased
+
+- **Menus across the top left**: Tide, View and Help. Tide holds Settings,
+  Open File... and Quit; View holds the terminal panel, split view, the
+  explorer and the git review, each with a tick beside what is showing; Help
+  is the shortcut list. The settings and review buttons have moved off the
+  right hand side into them.
+- **Open File...** browses the machine: folders first, `..` to go up, enter or
+  a click to open. A file opened this way is opened exactly as any other is -
+  same guards, same watching, same saving - and one from outside the project
+  is named in italics on its tab.
+- `ctrl+f` shows the search line straight away, with the cursor in it, rather
+  than waiting for the first keystroke. Four other prompts had the same fault.
+- In split view the right hand tab strip keeps the same inset as the left, and
+  the two strips no longer disagree with the layout about how wide the halves
+  are.
+- Dragging the docked terminal by its header is exact again, rather than
+  landing a row out.
+
+## 0.1.18 — 2026-08-28
 
 - **The classic appearance is deprecated.** The settings panel no longer
   offers a choice: tide is the modern one, with its six palettes. The classic

@@ -228,10 +228,15 @@ class TestSettingsPanel(unittest.TestCase):
         self.s.key(F9)
         self.assertNotIn('Indent width', self.s.screen())
 
-    def test_the_settings_chip_is_clickable(self):
+    def test_the_tide_menu_opens_it(self):
         top = self.s.text()[0]
-        self.assertIn('settings', top, 'no settings affordance in the top bar')
-        self.s.click(top.rindex('settings') + 2, 0)
+        self.assertIn('Tide', top, 'no menu in the top bar')
+        self.s.click(top.index('Tide') + 1, 0)
+        self.s.pump(0.4)
+        self.assertIn('Settings', self.s.screen(), 'the menu did not open')
+        row = next(y for y, line in enumerate(self.s.text())
+                   if 'Settings' in line)
+        self.s.click(self.s.line(row).index('Settings') + 1, row)
         self.assertIn('Indent width', self.s.screen())
 
     def test_changing_the_theme_repaints_and_persists(self):

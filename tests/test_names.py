@@ -113,7 +113,8 @@ class TestTabsInTheApp(unittest.TestCase):
         return app
 
     def tab_row(self, app):
-        return ''.join(c[0] or ' ' for c in app.screen.cells[1])
+        y = app.rects['tabs'].y
+        return ''.join(c[0] or ' ' for c in app.screen.cells[y])
 
     def test_two_files_with_one_name_are_told_apart(self):
         app = self.app('alpha/models/schema.py', 'beta/models/schema.py')
@@ -146,12 +147,15 @@ class TestTabsInTheApp(unittest.TestCase):
 
     def test_a_long_name_is_cropped_in_the_explorer_too(self):
         app = self.app()
-        row = ''.join(c[0] or ' ' for c in app.screen.cells[3][:26])
+        side = app.rects['sidebar']
+        row = ''.join(c[0] or ' ' for c in
+                      app.screen.cells[side.y + 3][side.x:side.x2])
         self.assertIn('…', row, 'the explorer cut the name with no sign of it')
         self.assertNotIn(self.long, row)
-        edge = app.rects['sidebar'].x2 - 1
-        self.assertEqual(app.screen.cells[3][edge][0], '│',
-                         'the name ran over the divider')
+        # the name must not run past the pane, whatever draws its edge
+        edge = app.rects['sidebar'].x2
+        self.assertIn(app.screen.cells[side.y + 3][edge][0], ('│', ' '),
+                      'the name ran over the edge of the pane')
 
 
 class TestTerminalTabNames(unittest.TestCase):
@@ -169,7 +173,8 @@ class TestTerminalTabNames(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def tabs(self):
-        return ''.join(c[0] or ' ' for c in self.s.vt.grid[1]).rstrip()
+        row = self.s.vt.grid[self.s.TAB_ROW]
+        return ''.join(c[0] or ' ' for c in row).rstrip()
 
     def settle(self, seconds=1.2):
         self.s.pump(0.8)

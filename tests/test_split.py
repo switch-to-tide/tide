@@ -56,7 +56,9 @@ class TestLayout(SplitTest):
         self.assertEqual(self.app.big_terms, [], 'a terminal appeared uninvited')
         rects = self.app.layout()
         self.assertIsNone(rects['split'])
-        self.assertEqual(rects['editor'].w, 120 - 26, 'the editor did not fill the pane')
+        self.assertGreaterEqual(rects['editor'].w, 120 - 26 - 4,
+                                'the editor did not fill the pane')
+        self.assertIsNone(rects['split'], 'there is nothing to split with')
 
     def test_a_terminal_turns_it_into_two_halves(self):
         self.app.toggle_split()
@@ -66,8 +68,10 @@ class TestLayout(SplitTest):
         self.assertIsNotNone(right)
         self.assertEqual(left.y, right.y)
         self.assertEqual(left.h, right.h)
-        self.assertEqual(rects['divider'], left.x2)
-        self.assertEqual(right.x, left.x2 + 1)
+        # the two halves are kept apart: in boxes by their borders, flush by
+        # the divider column between them
+        self.assertLessEqual(left.x2, rects['divider'])
+        self.assertLess(rects['divider'], right.x)
         self.assertLess(abs(left.w - right.w), 2, 'the halves are lopsided')
 
     def test_closing_the_last_terminal_gives_the_space_back(self):
@@ -77,15 +81,19 @@ class TestLayout(SplitTest):
         self.app.close_big_terminal(0)
         self.assertTrue(self.app.split, 'split view switched itself off')
         self.assertIsNone(self.app.layout()['split'])
-        self.assertEqual(self.app.layout()['editor'].w, 120 - 26)
+        self.assertGreaterEqual(self.app.layout()['editor'].w, 120 - 26 - 4,
+                                'the editor did not take the space back')
 
     def test_the_bottom_panel_is_untouched(self):
         self.app.toggle_split()
         self.app.new_big_terminal()
         rects = self.app.layout()
         self.assertIsNotNone(rects['terminal'])
-        self.assertEqual(rects['terminal'].y, rects['editor'].y2)
-        self.assertEqual(rects['terminal'].w, rects['editor'].w + rects['split'].w + 1)
+        self.assertGreater(rects['terminal'].y, rects['editor'].y2 - 1,
+                           'the panels overlap')
+        self.assertGreaterEqual(rects['terminal'].w,
+                                rects['editor'].w + rects['split'].w - 2,
+                                'the bottom panel lost width to the split')
 
     def test_a_narrow_window_stays_single(self):
         self.app.toggle_split()
@@ -201,17 +209,29 @@ class TestSplitInTheUI(unittest.TestCase):
         shutil.rmtree(self.cfg, ignore_errors=True)
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def right_half_is_a_terminal(self, row=3):
+    def right_half_is_a_terminal(self, row=None):
         """The shell's background colour gives the right half away."""
-        return self.s.cell(self.s.cols - 20, row)[2] == 234
+        from tide import theme
+        theme.apply('dark', 'modern')
+        row = self.s.BODY_ROW if row is None else row
+        return self.s.cell(self.s.cols - 20, row)[2] == theme.TERM_BG
 
-    def halves(self, row=4):
-        line = self.s.line(row)
-        return line[26:66].rstrip(), line[68:].rstrip()
+    def halves(self, row=None):
+        line = self.s.line(self.s.BODY_ROW + 1 if row is None else row)
+        middle = self.app_divider()
+        return line[26:middle].rstrip(), line[middle:].rstrip()
 
     def tabs(self):
         """The tab strip alone, past the explorer column."""
-        return self.s.line(self.s.TAB_ROW)[26:]
+        return self.s.line(self.s.TAB_ROW)[26:].strip('│ ')
+
+    def app_divider(self):
+        """The column between the two halves: the gap where they meet."""
+        row = self.s.line(self.s.TAB_ROW)
+        join = row.find('│ │', 26)
+        if join >= 0:
+            return join + 1
+        return row.index('|', 26)
 
     def new_terminal_button(self):
         line = self.s.line(0)
@@ -302,27 +322,29 @@ class TestSplitInTheUI(unittest.TestCase):
         row = self.tabs()
         self.assertIn('code.py', row, 'the file tabs are missing')
         self.assertIn('sh', row, 'the terminal tabs are missing')
-        self.assertIn('|', row, 'no separator between the two strips')
+        self.assertLess(row.index('code.py'), row.index('sh'),
+                        'the two strips are the wrong way round')
         top = self.s.line(0)[26:]
         self.assertNotIn('Editor', top, 'the switch is still there in split view')
         self.assertNotIn('Terminals', top)
 
-    def test_the_separator_lines_up_with_the_panes(self):
+    def test_the_halves_are_kept_apart_all_the_way_down(self):
         self.s.key(F5)
         self.s.pump(0.6)
         self.s.key(ESC + 'OS')
         self.s.pump(1.2)
-        row = self.s.line(self.s.TAB_ROW)
-        column = row.index('|', 26)
-        self.assertEqual(self.s.cell(column, 5)[2], 236,
-                         'the divider below sits somewhere else')
+        column = self.app_divider()
+        rows = [self.s.cell(column, y)[0] for y in
+                range(self.s.TAB_ROW, self.s.TAB_ROW + 6)]
+        self.assertTrue(all(ch in ('|', '│', ' ', '─', '╭', '╰') for ch in rows),
+                        'text is running through the join: %r' % rows)
 
     def test_clicking_either_strip_moves_the_keyboard(self):
         self.s.key(F5)
         self.s.pump(0.6)
         self.s.key(ESC + 'OS')
         self.s.pump(1.2)
-        column = 26 + self.tabs().index('code.py')   # the tab, not the explorer
+        column = self.s.line(self.s.TAB_ROW).index('code.py')
         self.s.click(column + 1, self.s.TAB_ROW)
         self.s.pump(0.4)
         self.s.type('TYPED ')
@@ -353,7 +375,7 @@ class TestSplitInTheUI(unittest.TestCase):
         self.s.key(ESC + 'OS')
         self.s.pump(1.2)
         row = self.s.line(self.s.TAB_ROW)
-        column = row.index('|', 26)
+        column = self.app_divider()
         right_before = row[column:]
         self.s.wheel(column - 10, self.s.TAB_ROW, up=False, times=3)
         self.s.pump(0.4)
