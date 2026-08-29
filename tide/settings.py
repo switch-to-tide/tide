@@ -15,6 +15,7 @@ DEFAULTS = {
     'split_view': False,
     'show_tree': True,
     'tab_width': 4,
+    'wrap': 'smart',
     'audio': False,
     'audio_sink_port': 0,
     'sidebar_width': 26,
@@ -37,6 +38,7 @@ FIELDS = [
     ('split_view', 'Split view', [True, False]),
     ('show_tree', 'Explorer', [True, False]),
     ('tab_width', 'Indent width', [2, 4, 8]),
+    ('wrap', 'Long lines', ['smart', 'on', 'off']),
     ('audio', 'Audio playback', [True, False]),
     ('review_open_modified', 'Review: modified files', [True, False]),
     ('review_open_added', 'Review: added files', [True, False]),
@@ -53,6 +55,7 @@ HINTS = {
     'split_view': 'editor and terminal side by side',
     'show_tree': 'file explorer, at startup',
     'tab_width': 'when a file has none to copy',
+    'wrap': 'wrap them, or scroll sideways',
     'audio': 'needs ffmpeg or mpv; off until it is there',
     'review_open_modified': 'open, or folded to one line',
     'review_open_added': 'open, or folded to one line',
@@ -156,8 +159,13 @@ def save(values, path=None):
         return False
 
 
+WRAP_WORDS = {'smart': 'wrap text files', 'on': 'wrap all', 'off': 'scroll all'}
+
+
 def show(key, value):
     """How a value is written in the settings panel."""
+    if key == 'wrap':
+        return WRAP_WORDS.get(value, value)
     if isinstance(value, bool):
         return 'on' if value else 'off'
     if key == 'max_mb':

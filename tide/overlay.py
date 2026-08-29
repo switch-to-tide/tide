@@ -232,6 +232,83 @@ class Prompt(object):
         return (min(tx + self.cursor, x + w - 9), y)
 
 
+class Choice(object):
+    """A question with more than two answers, in a box in the middle.
+
+    Used where yes/no on the status line is not enough and the wrong answer
+    costs you work - quitting with unsaved files, say.
+    """
+
+    is_list = True                 # no prompt line under it
+
+    def __init__(self, title, lines, options, index=0):
+        self.title = title
+        self.lines = list(lines)          # what the box says
+        self.options = list(options)      # (letter, label, action)
+        self.index = index
+        self.rect = Rect(0, 0, 1, 1)
+
+    def close(self):
+        return 'close'
+
+    def pick(self, index):
+        if 0 <= index < len(self.options):
+            self.options[index][2]()
+        return 'close'
+
+    def on_key(self, key):
+        name = key.name
+        if name == 'escape':
+            return self.pick(len(self.options) - 1)   # the last one is the way out
+        if name in ('down', 'right', 'tab'):
+            self.index = (self.index + 1) % len(self.options)
+            return 'keep'
+        if name in ('up', 'left'):
+            self.index = (self.index - 1) % len(self.options)
+            return 'keep'
+        if name == 'enter':
+            return self.pick(self.index)
+        if name == 'char':
+            ch = key.char.lower()
+            for i, (letter, _label, _action) in enumerate(self.options):
+                if ch == letter:
+                    return self.pick(i)
+        return 'keep'
+
+    def on_paste(self, _text):
+        pass
+
+    def on_mouse(self, ev):
+        if ev.kind != 'press':
+            return True
+        row = ev.y - self.rect.y - len(self.lines) - 2
+        if self.rect.contains(ev.x, ev.y) and 0 <= row < len(self.options):
+            return self.pick(row)
+        return True
+
+    def render(self, screen, area):
+        width = min(70, max(40, area.w - 8))
+        height = len(self.lines) + len(self.options) + 3
+        x = area.x + (area.w - width) // 2
+        y = area.y + max(0, (area.h - height) // 2)
+        self.rect = Rect(x, y, width, height)
+        screen.fill(x, y, width, height, bg=theme.PANEL_ALT)
+        screen.fill(x, y, width, 1, bg=theme.WARN)
+        screen.put(x + 1, y, (' %s ' % self.title)[:width - 2],
+                   fg=theme.STATUS_FG, bg=theme.WARN, attr=BOLD)
+        for i, text in enumerate(self.lines):
+            screen.put(x + 2, y + 1 + i, text[:width - 4], fg=theme.FG,
+                       bg=theme.PANEL_ALT)
+        for i, (letter, label, _action) in enumerate(self.options):
+            row = y + len(self.lines) + 2 + i
+            chosen = i == self.index
+            bg = theme.TREE_SEL_BG if chosen else theme.PANEL_ALT
+            screen.fill(x + 1, row, width - 2, 1, bg=bg)
+            screen.put(x + 2, row, '%s  %s' % (letter, label), fg=theme.FG, bg=bg,
+                       attr=BOLD if chosen else 0, max_x=x + width - 2)
+        return None
+
+
 class Confirm(object):
     """A yes/no/cancel question shown on the prompt line.
 

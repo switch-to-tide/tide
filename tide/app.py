@@ -19,7 +19,7 @@ from . import menu as menus
 from . import names as tabnames
 from .keys import ALT, CTRL, SHIFT, Decoder, Key, Mouse, Paste
 from .review import Review
-from .overlay import Confirm, Help, Prompt, SettingsPanel
+from .overlay import Choice, Confirm, Help, Prompt, SettingsPanel
 from .term import BOLD, DIM, ITALIC, STRIKE, RawTerminal, Rect, Screen
 from .termpanel import TerminalPanel
 
@@ -2141,6 +2141,11 @@ class App(object):
 
     def quit(self):
         self.autosave_flush()
+        if self.autosave:
+            # auto-save means what it says: nothing is lost on the way out
+            for e in self.editors:
+                if e.doc.dirty and e.doc.path:
+                    self.save(e)
         dirty = [e for e in self.editors if e.doc.dirty]
         if not dirty:
             self.running = False
@@ -2151,14 +2156,23 @@ class App(object):
                 if e.doc.path:
                     self.save(e)
             if any(e.doc.dirty for e in self.editors):
-                # something could not be written (untitled, or a failed save)
+                # something could not be written: untitled, or a failed save
                 self.status('Still unsaved - use alt+s to give it a name, '
-                            'or ctrl+q then n to discard')
+                            'or ctrl+q then q to discard')
                 return
             self.running = False
 
-        self.overlay = Confirm('Save %d modified file(s) before quitting?' % len(dirty),
-                               save_all, on_no=lambda: setattr(self, 'running', False))
+        names = ', '.join(e.doc.name for e in dirty[:4])
+        if len(dirty) > 4:
+            names += ' and %d more' % (len(dirty) - 4)
+        self.overlay = Choice(
+            'Unsaved changes',
+            ['%d file(s) have changes that are not on disk:' % len(dirty),
+             names, '', 'Quitting without saving loses them.'],
+            [('s', 'Save all and quit', save_all),
+             ('q', 'Quit without saving',
+              lambda: setattr(self, 'running', False)),
+             ('c', 'Cancel - stay in tide', lambda: None)])
         self.need_render = True
 
     # ---------------- main loop ----------------

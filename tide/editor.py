@@ -7,6 +7,7 @@ from . import clipboard, theme
 from .buffer import Document, is_word_char
 from .highlight import Highlighter, LineStates
 from .keys import CTRL, ALT, SHIFT
+from . import wrap
 from .term import BOLD, DIM, REVERSE, Rect, char_width
 
 HSCROLL_FADE = 1.6       # seconds the sideways bar stays after you stop
@@ -24,7 +25,10 @@ class Editor(object):
         self.tab_width = getattr(app, 'default_tab_width', None) or self.hl.tab_width
         self.use_spaces = True
         self.indent_detected = False
-        self.top = 0
+        self._top = 0             # first document row on screen
+        self.top_seg = 0          # which of its wrapped pieces is at the top
+        self._wrap_key = None
+        self._wrap_cache = {}
         self.left = 0
         self._widest = 0
         self._widest_key = None
@@ -74,6 +78,106 @@ class Editor(object):
         return self.doc.name
 
     # ---------------- display geometry ----------------
+    @property
+    def top(self):
+        return self._top
+
+    @top.setter
+    def top(self, row):
+        # setting a row outright means the top of that row, wrapped or not
+        self._top = row
+        self.top_seg = 0
+
+    def wrapping(self):
+        """Whether this file's long lines are wrapped rather than scrolled."""
+        settings = getattr(self.app, 'settings', None) or {}
+        return wrap.wraps(settings.get('wrap', 'smart'), self.doc.path)
+
+    def _xs(self, row):
+        """Where each character of a row sits once tabs are expanded."""
+        line = self.doc.line(row)
+        xs = [0] * (len(line) + 1)
+        x = 0
+        for i, ch in enumerate(line):
+            x = self._advance(ch, x)
+            xs[i + 1] = x
+        return xs
+
+    def segments(self, row):
+        """The (start, end) pieces a row is drawn in - one unless wrapped."""
+        line = self.doc.line(row)
+        if not self.wrapping():
+            return [(0, len(line))]
+        key = (self.text_rect.w, self.tab_width)
+        if self._wrap_key != key or len(self._wrap_cache) > 4000:
+            self._wrap_key, self._wrap_cache = key, {}
+        # kept against the line itself: an edit or a reload from disk makes a
+        # new string, so there is no stale answer to give
+        cached = self._wrap_cache.get(row)
+        if cached is not None and cached[0] is line:
+            return cached[1]
+        segs = wrap.segments(line, max(2, self.text_rect.w), self._xs(row))
+        self._wrap_cache[row] = (line, segs)
+        return segs
+
+    def vrows(self, row):
+        """Screen rows a document row takes, including the blank after a wrap."""
+        count = len(self.segments(row))
+        return count + 1 if count > 1 else 1
+
+    def seg_of_col(self, row, col):
+        for i, (start, end) in enumerate(self.segments(row)):
+            if col < end:
+                return i
+        return len(self.segments(row)) - 1
+
+    def vstep(self, pos, delta):
+        """Move a (row, piece) position by that many screen rows."""
+        row, seg = pos
+        last = len(self.doc.lines) - 1
+        while delta > 0:
+            if seg + 1 < self.vrows(row):
+                seg += 1
+            elif row < last:
+                row, seg = row + 1, 0
+            else:
+                break
+            delta -= 1
+        while delta < 0:
+            if seg > 0:
+                seg -= 1
+            elif row > 0:
+                row -= 1
+                seg = self.vrows(row) - 1
+            else:
+                break
+            delta += 1
+        return (row, seg)
+
+    def visible(self, height=None):
+        """[(row, piece)] from the top of the pane down, as far as it goes."""
+        height = self.text_rect.h if height is None else height
+        rows = []
+        pos = (max(0, min(self._top, len(self.doc.lines) - 1)), self.top_seg)
+        last = len(self.doc.lines) - 1
+        for _ in range(max(0, height)):
+            rows.append(pos)
+            nxt = self.vstep(pos, 1)
+            if nxt == pos:
+                break
+            pos = nxt
+        return rows
+
+    def _clamp_top(self):
+        """Never scroll past the last screenful."""
+        last = len(self.doc.lines) - 1
+        self._top = max(0, min(self._top, last))
+        self.top_seg = max(0, min(self.top_seg, self.vrows(self._top) - 1))
+        end = (last, self.vrows(last) - 1)
+        limit = self.vstep(end, -(max(1, self.text_rect.h) - 1))
+        if (self._top, self.top_seg) > limit:
+            self._top, self.top_seg = limit
+
     def _advance(self, ch, x):
         if ch == '\t':
             return x + (self.tab_width - x % self.tab_width)
@@ -125,6 +229,8 @@ class Editor(object):
 
     def max_left(self):
         """Furthest left column: the widest line, less one screenful."""
+        if self.wrapping():
+            return 0                        # nothing runs off the side
         key = (self.doc._version, self.tab_width)
         if self._widest_key != key:
             lines = self.doc.lines
@@ -177,11 +283,20 @@ class Editor(object):
         row, col = self.doc.cursor
         h = max(1, self.text_rect.h)
         w = max(1, self.text_rect.w)
+        if self.wrapping():
+            self.left = 0
+            here = (row, self.seg_of_col(row, col))
+            if here < (self._top, self.top_seg):
+                self._top, self.top_seg = here
+            elif here not in self.visible(h):
+                self._top, self.top_seg = self.vstep(here, -(h - 1))
+            self._clamp_top()
+            return
         if row < self.top:
             self.top = row
         elif row >= self.top + h:
             self.top = row - h + 1
-        self.top = max(0, min(self.top, max(0, len(self.doc.lines) - 1)))
+        self._top = max(0, min(self._top, max(0, len(self.doc.lines) - 1)))
         x = self.col_to_x(row, col)
         if x < self.left:
             self.left = max(0, x - 4)
@@ -189,6 +304,10 @@ class Editor(object):
             self.left = x - w + 1
 
     def scroll(self, delta):
+        if self.wrapping():
+            self._top, self.top_seg = self.vstep((self._top, self.top_seg), delta)
+            self._clamp_top()
+            return
         self.top = max(0, min(self.max_top(), self.top + delta))
 
     def sb_press(self, y):
@@ -648,8 +767,7 @@ class Editor(object):
             self.sb_press(ev.y)
             return True
         in_gutter = self.rect.contains(ev.x, ev.y) and ev.x < r.x
-        row = self.top + max(0, ev.y - r.y)
-        row = max(0, min(len(self.doc.lines) - 1, row))
+        row, seg = self.row_at(ev.y)
         if ev.kind == 'press':
             now = time.time()
             last_t, last_pos = self.last_click
@@ -660,7 +778,7 @@ class Editor(object):
                 self.select_line_at(row)
                 self.drag_mode = 'line'
                 return True
-            col = self.x_to_col(row, self.left + max(0, ev.x - r.x))
+            col = self.col_at(row, seg, ev.x)
             if self.click_count >= 3:
                 self.select_line_at(row)
                 self.drag_mode = 'line'
@@ -676,11 +794,11 @@ class Editor(object):
                 return False
             if ev.y < r.y:
                 self.scroll(-1)
-                row = self.top
+                row, seg = self._top, self.top_seg
             elif ev.y >= r.y2:
                 self.scroll(1)
-                row = min(len(self.doc.lines) - 1, self.top + r.h - 1)
-            col = self.x_to_col(row, self.left + max(0, ev.x - r.x))
+                row, seg = self.row_at(r.y2 - 1)
+            col = self.col_at(row, seg, ev.x)
             if self.doc.anchor is None:
                 self.doc.anchor = self.doc.cursor
             if self.drag_mode == 'line':
@@ -693,6 +811,22 @@ class Editor(object):
             self.drag_mode = None
             return True
         return False
+
+    def row_at(self, y):
+        """Which (row, piece) is painted on that screen row."""
+        rows = self.visible()
+        i = max(0, y - self.text_rect.y)
+        if not rows:
+            return (0, 0)
+        return rows[min(i, len(rows) - 1)]
+
+    def col_at(self, row, seg, x):
+        """Which character a click at that column is nearest."""
+        segs = self.segments(row)
+        seg = max(0, min(seg, len(segs) - 1))
+        start = segs[seg][0]
+        origin = self._xs(row)[start] if self.wrapping() else self.left
+        return self.x_to_col(row, origin + max(0, x - self.text_rect.x))
 
     # ---------------- painting ----------------
     def render(self, screen, rect, focused):
@@ -710,30 +844,50 @@ class Editor(object):
         self.text_rect = Rect(rect.x + self.gutter, rect.y,
                               rect.w - self.gutter - (1 if show_bar else 0), rect.h)
         r = self.text_rect
-        self.top = max(0, min(self.top, self.max_top()))
+        if not self.wrapping():
+            self.top = max(0, min(self.top, self.max_top()))
         sel = doc.selection()
         cur_row = doc.cursor[0]
         screen.fill(rect.x, rect.y, rect.w, rect.h, bg=theme.BG)
         matches = self.find_matches
+        wrapped = self.wrapping()
+        if wrapped:
+            self.left = 0
+            self._clamp_top()
+        painted = self.visible(r.h) if wrapped else \
+            [(self.top + i, 0) for i in range(r.h)]
         for i in range(r.h):
-            row = self.top + i
             y = r.y + i
+            row, seg = painted[i] if i < len(painted) else (nlines, 0)
             if row >= nlines:
                 screen.put(rect.x, y, '~'.rjust(self.gutter - 1), fg=theme.BORDER, bg=theme.BG)
                 continue
             line = doc.lines[row]
             is_cur = row == cur_row
-            # gutter: [change bar] [line number] [space] [text]
+            segs = self.segments(row)
+            blank = seg >= len(segs)     # the breather after a wrapped line
+            start, end = (len(line), len(line)) if blank else segs[seg]
+            start, end = min(start, len(line)), min(end, len(line))
+            xs = self._xs(row) if wrapped else None
+            origin = xs[start] if wrapped else self.left
+            # gutter: [change bar] [line number] [space] [text]. A line that
+            # carried on from the row above says so by having no number.
             num_x = rect.x + (1 if self.git_gutter else 0)
-            num = str(row + 1).rjust(self.gutter - 1 - (1 if self.git_gutter else 0))
+            num = (str(row + 1) if seg == 0 else '').rjust(
+                self.gutter - 1 - (1 if self.git_gutter else 0))
             screen.put(num_x, y, num, fg=(theme.LINENO_CUR if is_cur else theme.LINENO),
                        bg=theme.GUTTER_BG, attr=BOLD if is_cur else 0)
             if self.git_gutter:
                 mark = self.git_marks.get(row)
-                if mark:
+                if mark and seg == 0:
                     glyph = '▁' if mark == 'deleted' else '▌'
                     screen.put(rect.x, y, glyph, fg=theme.LINE_COLOUR[mark],
                                bg=theme.GUTTER_BG)
+                elif mark:
+                    screen.put(rect.x, y, '▌', fg=theme.LINE_COLOUR[mark],
+                               bg=theme.GUTTER_BG, attr=DIM)
+            if blank:
+                continue
             base_bg = theme.BG_ALT if (is_cur and sel is None and focused) else theme.BG
             if base_bg != theme.BG:
                 screen.fill(r.x, y, r.w, 1, bg=base_bg)
@@ -761,28 +915,29 @@ class Editor(object):
             for k, is_cur_match in match_cols:
                 match_map[k] = match_map.get(k, False) or is_cur_match
             # paint characters
-            x = 0
-            for idx, ch in enumerate(line):
+            x = xs[start] if wrapped else 0
+            for idx in range(start if wrapped else 0, end if wrapped else len(line)):
+                ch = line[idx]
                 nx = self._advance(ch, x)
-                if nx > self.left and x < self.left + r.w:
+                if nx > origin and x < origin + r.w:
                     fg, attr = theme.token_style(kinds[idx] or 'text')
                     bg = base_bg
                     if sel_span and sel_span[0] <= idx < sel_span[1]:
                         bg = theme.SELECTION
                     elif idx in match_map:
                         bg = theme.FIND_CUR if match_map[idx] else theme.FIND_MATCH
-                    sx = r.x + x - self.left
+                    sx = r.x + x - origin
                     if ch == '\t':
                         width = nx - x
                         screen.fill(max(r.x, sx), y, min(width, r.x2 - max(r.x, sx)), 1, bg=bg)
                     elif sx >= r.x:
                         screen.put(sx, y, ch, fg=fg, bg=bg, attr=attr, max_x=r.x2)
                 x = nx
-                if x - self.left > r.w:
+                if x - origin > r.w:
                     break
             # selection continues past end of line (multi-line selections)
-            if sel_span and sel_span[1] > len(line):
-                sx = r.x + x - self.left
+            if sel_span and sel_span[1] > len(line) and end >= len(line):
+                sx = r.x + x - origin
                 if r.x <= sx < r.x2:
                     screen.fill(sx, y, 1, 1, bg=theme.SELECTION)
         self._render_scrollbar(screen, focused)
@@ -857,6 +1012,15 @@ class Editor(object):
     def cursor_screen_pos(self):
         row, col = self.doc.cursor
         r = self.text_rect
+        if self.wrapping():
+            here = (row, self.seg_of_col(row, col))
+            rows = self.visible()
+            if here not in rows:
+                return None
+            y = r.y + rows.index(here)
+            start = self.segments(row)[here[1]][0]
+            x = r.x + self.col_to_x(row, col) - self._xs(row)[start]
+            return (x, y) if r.x <= x < r.x2 else None
         y = r.y + row - self.top
         x = r.x + self.col_to_x(row, col) - self.left
         if r.y <= y < r.y2 and r.x <= x < r.x2:

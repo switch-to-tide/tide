@@ -175,20 +175,30 @@ class TestUndoAcrossAutoSave(DurabilityTest):
 class TestManualSaveDurability(DurabilityTest):
     args = ('--no-autosave',)
 
-    def test_quit_asks_and_saving_works(self):
+    def test_quit_warns_and_saving_works(self):
         self.type_marker('MANUAL ')
         self.s.key(CTRL('q'), settle=0.4)
-        self.assertIn('before quitting?', self.s.screen())
-        self.s.send_raw('y')
+        screen = self.s.screen()
+        self.assertIn('Unsaved changes', screen)
+        self.assertIn('loses them', screen)
+        self.s.send_raw('s')
         self.assertTrue(self.s.wait_exit())
         self.assertEqual(self.read(), 'MANUAL ' + ORIGINAL)
 
-    def test_declining_keeps_the_file_as_it_was(self):
+    def test_quitting_anyway_keeps_the_file_as_it_was(self):
         self.type_marker('DISCARD ')
         self.s.key(CTRL('q'), settle=0.4)
-        self.s.send_raw('n')
+        self.s.send_raw('q')
         self.assertTrue(self.s.wait_exit())
         self.assertEqual(self.read(), ORIGINAL)
+
+    def test_cancelling_stays_in_tide(self):
+        self.type_marker('STAY ')
+        self.s.key(CTRL('q'), settle=0.4)
+        self.s.send_raw('c')
+        self.s.pump(0.5)
+        self.assertTrue(self.s.alive(), 'cancel quit anyway')
+        self.assertNotIn('Unsaved changes', self.s.screen())
 
     def test_sighup_does_not_write_when_autosave_is_off(self):
         self.type_marker('NOPE ')

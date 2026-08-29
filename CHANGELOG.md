@@ -6,6 +6,19 @@ Versions are tagged in git as `v0.1.0` and so on, and the installer takes one:
 curl -fsSL https://raw.githubusercontent.com/switch-to-tide/tide/main/install.sh | sh -s -- 0.1.0
 ```
 
+## 0.1.23 — 2026-08-29
+
+- **Long lines can wrap.** A new setting, *Long lines*: wrap text files (the
+  default - prose, logs, markdown and anything without an extension wrap, code
+  scrolls sideways as before), wrap all, or scroll all. A wrapped line carries
+  on in the next row with no line number of its own, and a blank row after the
+  last piece shows where the real newline is, so a wrap never reads as one.
+  Clicking, selecting, the cursor and scrolling all follow the rows on screen.
+- **Quitting with unsaved work asks properly.** With auto-save off, ctrl+q
+  names the files that are not on disk and offers three answers: save all and
+  quit, quit without saving, or stay. With auto-save on, everything with a
+  name is written before tide leaves.
+
 ## 0.1.22 — 2026-08-29
 
 - **Named sessions.** *Tide > Save to named session...* remembers where you
