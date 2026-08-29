@@ -378,6 +378,8 @@ class Document(object):
 
     def replace(self, start, end, text, coalesce=False):
         """Replace [start, end) with text; records undo. -> new position."""
+        if self.readonly or self.disk_missing:
+            return self.cursor         # nothing to write it to, or not ours
         start, end = self._ordered(self.clamp(start), self.clamp(end))
         removed = self.get_range(start, end)
         if not removed and not text:

@@ -6,7 +6,23 @@ Versions are tagged in git as `v0.1.0` and so on, and the installer takes one:
 curl -fsSL https://raw.githubusercontent.com/switch-to-tide/tide/main/install.sh | sh -s -- 0.1.0
 ```
 
-## 0.1.19 — unreleased
+## 0.1.20 — 2026-08-29
+
+- The change markers down the scrollbar are as tall as the change they mark:
+  a run of changed lines is one continuous bar of its share of the file,
+  rather than a tick wherever a change begins.
+- A file deleted on disk while it is open stays readable but is no longer
+  yours to change: its name is struck through on the tab, edits are refused,
+  and `ctrl+s` will not write it back into existence. Close the tab and it is
+  gone.
+- The menus follow the pointer: whatever you are over is what is highlighted,
+  rather than always the first item.
+- **Git review** is ticked in the View menu while you are in it, and choosing
+  it again leaves - as `f10` already did.
+- Split view never offers the Editor/Terminals switch, not even with no shell
+  open: both panes are already on screen, and the `</>` button opens one.
+
+## 0.1.19 — 2026-08-28
 
 - **Menus across the top left**: Tide, View and Help. Tide holds Settings,
   Open File... and Quit; View holds the terminal panel, split view, the

@@ -816,11 +816,23 @@ class Editor(object):
         screen.fill(self.sb_x, r.y + offset, 1, thumb, bg=colour)
         self._render_overview(screen)
 
+    def _runs(self):
+        """The changed lines, grouped into runs: [(first, last, kind)]."""
+        runs = []
+        for line in sorted(self.git_marks):
+            kind = self.git_marks[line]
+            if runs and runs[-1][2] == kind and runs[-1][1] == line - 1:
+                runs[-1][1] = line
+            else:
+                runs.append([line, line, kind])
+        return [(a, b, k) for a, b, k in runs]
+
     def _render_overview(self, screen):
         """Where the changes are, in miniature, down the scrollbar.
 
-        One tick per screen row, so a long file shows its edits at a glance
-        without scrolling to find them.
+        Each run of changed lines is drawn as a bar of its own height, so a
+        long file shows at a glance both where its edits are and how much of
+        it they cover.
         """
         if not self.git_marks or self.sb_x is None:
             return
@@ -828,10 +840,14 @@ class Editor(object):
         total = max(1, len(self.doc.lines))
         rank = {'added': 1, 'modified': 2, 'deleted': 3}
         worst = {}
-        for line, kind in self.git_marks.items():
-            y = r.y + min(r.h - 1, int(line * r.h / total))
-            if rank.get(kind, 0) >= rank.get(worst.get(y), 0):
-                worst[y] = kind
+        for start, end, kind in self._runs():
+            # a run of changed lines is a bar as tall as its share of the
+            # file, so ten changed lines read as ten times one changed line
+            top = r.y + int(start * r.h / total)
+            bottom = r.y + int((end + 1) * r.h / total)
+            for y in range(top, max(top + 1, bottom)):
+                if rank.get(kind, 0) >= rank.get(worst.get(y), 0):
+                    worst[y] = kind
         for y, kind in worst.items():
             if not (0 <= y < screen.height):
                 continue

@@ -181,7 +181,10 @@ class Decoder(object):
                             'wheel_right')[code & 3]
                     button = 0
                 elif code & 32:
-                    kind, button = 'drag', code & 3
+                    # 35 is motion with no button held, which the terminal
+                    # only reports while something has asked to hear it
+                    kind = 'move' if (code & 3) == 3 else 'drag'
+                    button = code & 3
                 elif updown == 'm':
                     kind, button = 'release', code & 3
                 else:

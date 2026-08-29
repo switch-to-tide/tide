@@ -104,6 +104,14 @@ class Dropdown(object):
         pass
 
     def on_mouse(self, ev):
+        if ev.kind == 'move':
+            index = self.y_to_index(ev.y)
+            if self.rect.contains(ev.x, ev.y) and 0 <= index < len(self.items) \
+                    and self.items[index] is not SEPARATOR \
+                    and index != self.index:
+                self.index = index
+                self.app.need_render = True
+            return True
         if ev.kind not in ('press', 'release'):
             return True
         if not self.rect.contains(ev.x, ev.y):

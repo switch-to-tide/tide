@@ -499,6 +499,64 @@ class TestTabDecorations(unittest.TestCase):
         self.assertIn('tracked.txt* M ', self.tab_row(), self.tab_row())
 
 
+class TestRulerRuns(unittest.TestCase):
+    """A run of changed lines is a bar of its own height, not a tick."""
+
+    def setUp(self):
+        import io
+        from tide.app import App
+        from tide.term import Screen
+        self.repo = make_repo(prefix='tide-runs-')
+        self.path = os.path.join(self.repo, 'long.py')
+        self.lines = ['line %d' % i for i in range(200)]
+        with open(self.path, 'w') as f:
+            f.write('\n'.join(self.lines) + '\n')
+        git(self.repo, 'add', '-A')
+        git(self.repo, 'commit', '-q', '-m', 'long')
+        self.cfg = tempfile.mkdtemp(prefix='tide-runs-cfg-')
+        os.environ['TIDE_CONFIG_HOME'] = self.cfg
+        self.app = App(root=self.repo, paths=[], out=io.StringIO())
+        self.app.screen = Screen(90, 26)
+        self.app.show_term = False
+
+    def tearDown(self):
+        os.environ.pop('TIDE_CONFIG_HOME', None)
+        shutil.rmtree(self.repo, ignore_errors=True)
+        shutil.rmtree(self.cfg, ignore_errors=True)
+
+    def ruler(self, lines):
+        from tide import theme
+        with open(self.path, 'w') as f:
+            f.write('\n'.join(lines) + '\n')
+        editor = self.app.open_file(self.path)
+        self.app.git.refresh(force=True)
+        for _ in range(3):
+            time.sleep(0.4)
+            self.app.refresh_git()
+        self.app.render()
+        names = {theme.GIT_LINE_ADDED: 'G', theme.GIT_LINE_MODIFIED: 'B',
+                 theme.GIT_LINE_DELETED: 'R'}
+        return ''.join(names.get(self.app.screen.cells[y][editor.sb_x][1], '.')
+                       for y in range(editor.text_rect.y, editor.text_rect.y2))
+
+    def test_half_the_file_changing_marks_half_the_ruler(self):
+        changed = self.lines[:100] + ['new %d' % i for i in range(100)]
+        picture = self.ruler(changed)
+        marked = len(picture.replace('.', ''))
+        self.assertGreaterEqual(marked, len(picture) // 3,
+                                'half a file changed should mark a good part '
+                                'of the ruler: %r' % picture)
+        self.assertNotIn('.', picture[-marked:].rstrip('.'),
+                         'the run is broken up: %r' % picture)
+
+    def test_one_changed_line_is_one_mark(self):
+        changed = list(self.lines)
+        changed[5] = 'line 5 CHANGED'
+        picture = self.ruler(changed)
+        self.assertEqual(len(picture.replace('.', '')), 1,
+                         'one line should be one mark: %r' % picture)
+
+
 class TestFolderColours(unittest.TestCase):
     """A folder is bold; only git gives it a colour."""
 

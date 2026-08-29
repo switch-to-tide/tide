@@ -17,6 +17,7 @@ DIM = 2
 ITALIC = 4
 UNDERLINE = 8
 REVERSE = 16
+STRIKE = 32
 
 DEFAULT = -1  # "terminal default" colour
 
@@ -56,6 +57,8 @@ def _sgr(fg, bg, attr):
         parts.append('4')
     if attr & REVERSE:
         parts.append('7')
+    if attr & STRIKE:
+        parts.append('9')
     if fg == DEFAULT:
         parts.append('39')
     elif fg < 256:

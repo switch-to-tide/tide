@@ -452,6 +452,22 @@ class TestTheMenus(unittest.TestCase):
         self.app.handle_key(Key('up'))
         self.assertEqual(menu.index, first)
 
+    def test_the_highlight_follows_the_pointer(self):
+        from tide.keys import Mouse
+        menu = self.open_menu('View')
+        rows = [i for i, item in enumerate(menu.items) if item is not None]
+        target = rows[2]
+        self.app.handle_mouse(Mouse('move', menu.rect.x + 3,
+                                    menu.rect.y + 1 + target))
+        self.assertEqual(menu.index, target)
+
+    def test_split_view_never_offers_the_editor_terminal_switch(self):
+        self.app.split = True
+        self.app.big_terms = []
+        self.app.render()
+        top = ''.join(c[0] or ' ' for c in self.app.screen.cells[0])
+        self.assertNotIn('Editor', top)
+
     def test_it_skips_the_separators(self):
         menu = self.open_menu('Tide')
         seen = set()

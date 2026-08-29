@@ -360,6 +360,23 @@ class TestGettingInAndOut(ReviewTest):
         app.handle_mouse(Mouse('press', menu.rect.x + 2, menu.rect.y + 1 + i))
         self.assertIsNotNone(app.review)
 
+    def test_the_view_menu_ticks_it_and_takes_you_back_out(self):
+        self.change_everything()
+        app = self.app()
+        app.render()
+        app.open_review()
+        app.render()
+        span = next(s for s in app.menu_spans if s[2] == 'View')
+        app.handle_mouse(Mouse('press', span[0] + 1, 0))
+        app.render()
+        menu = app.overlay
+        i = next(i for i, item in enumerate(menu.items)
+                 if item and 'Git review' in item[0])
+        self.assertTrue(menu.items[i][0].startswith('\u2713'),
+                        'the review is showing but is not ticked')
+        app.handle_mouse(Mouse('press', menu.rect.x + 2, menu.rect.y + 1 + i))
+        self.assertIsNone(app.review, 'choosing it again did not leave')
+
     def test_split_view_is_put_aside_and_given_back(self):
         self.change_everything()
         app = self.app()

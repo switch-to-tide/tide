@@ -127,12 +127,6 @@ class AppWatchTest(unittest.TestCase):
         self.app.autosave_tick()
         self.assertFalse(os.path.exists(self.path), 'auto-save resurrected a deleted file')
 
-    def test_ctrl_s_writes_a_deleted_file_back(self):
-        os.remove(self.path)
-        self.app.check_disk_changes(force=True)
-        self.app.save()
-        self.assertEqual(self.read(), 'one\ntwo\n')
-
     def test_undo_after_a_reload_is_harmless(self):
         self.app.editor.doc.insert('typed')
         self.app.autosave_tick()
@@ -303,6 +297,56 @@ class ConflictTest(unittest.TestCase):
         self.s.pump(0.6)
         self.assertIn('theirs', self.s.screen())
         self.assertNotIn('MINE', self.s.screen())
+
+
+class TestADeletedFileStaysReadable(unittest.TestCase):
+    """The file is gone, but what you had of it is not."""
+
+    def setUp(self):
+        import io
+        from tide.app import App
+        from tide.term import Screen
+        self.tmp = tempfile.mkdtemp(prefix='tide-gone-')
+        self.path = os.path.join(self.tmp, 'doomed.py')
+        with open(self.path, 'w') as f:
+            f.write('keep me\nand me\n')
+        self.app = App(root=self.tmp, paths=[], out=io.StringIO())
+        self.app.screen = Screen(90, 14)
+        self.app.show_term = False
+        self.editor = self.app.open_file(self.path)
+        self.app.render()
+        os.remove(self.path)
+        self.app.check_disk_changes(force=True)
+        self.app.render()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_the_name_is_struck_through(self):
+        from tide.term import STRIKE
+        row = self.app.screen.cells[self.app.rects['tabs'].y]
+        line = ''.join(c[0] or ' ' for c in row)
+        self.assertTrue(row[line.index('doomed.py')][3] & STRIKE,
+                        'a deleted file should be struck out')
+
+    def test_the_content_is_still_there_and_cannot_be_changed(self):
+        before = self.editor.doc.text()
+        self.editor.doc.cursor = (0, 0)
+        self.editor.doc.insert('XXX')
+        self.assertEqual(self.editor.doc.text(), before, 'it took an edit')
+
+    def test_saving_does_not_put_it_back(self):
+        self.assertFalse(self.app.save())
+        self.assertFalse(os.path.exists(self.path), 'ctrl+s resurrected it')
+        self.assertIn('deleted', self.app.message)
+
+    def test_a_file_that_comes_back_is_editable_again(self):
+        with open(self.path, 'w') as f:
+            f.write('keep me\nand me\n')
+        self.app.check_disk_changes(force=True)
+        self.editor.doc.cursor = (0, 0)
+        self.editor.doc.insert('X')
+        self.assertTrue(self.editor.doc.text().startswith('X'))
 
 
 if __name__ == '__main__':

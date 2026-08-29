@@ -19,7 +19,7 @@ from . import names as tabnames
 from .keys import ALT, CTRL, SHIFT, Decoder, Key, Mouse, Paste
 from .review import Review
 from .overlay import Confirm, Help, Prompt, SettingsPanel
-from .term import BOLD, DIM, ITALIC, RawTerminal, Rect, Screen
+from .term import BOLD, DIM, ITALIC, STRIKE, RawTerminal, Rect, Screen
 from .termpanel import TerminalPanel
 
 SIDEBAR_W = 26
@@ -340,6 +340,10 @@ class App(object):
             return False
         if getattr(ed, 'is_audio', False):
             return False               # a sound file has nothing to save
+        if ed.doc.disk_missing and path is None:
+            self.status('%s was deleted; it will not be written back'
+                        % self.rel(ed.doc.path))
+            return False               # 'save as' is still the way to keep it
         if ed.is_diff:
             self.status('%s is a read-only diff' % ed.title)
             return False
@@ -437,7 +441,8 @@ class App(object):
             if not doc.disk_missing:
                 doc.disk_missing = True
                 doc.autosave_blocked = True       # do not resurrect it silently
-                self.status('%s was deleted on disk (ctrl+s writes it back)'
+                self.status('%s was deleted on disk - the tab is read-only '
+                            'now; copy what you need before closing it'
                             % self.rel(doc.path))
                 self.need_render = True
             return
@@ -1130,7 +1135,7 @@ class App(object):
         if not chrome.boxed():       # classic has the explorer header up here
             self.menu_spans, x = menus.MenuBar.render(scr, rect, self.menu_open)
             x += 1
-        if not self.split_active():
+        if not self.split:           # in split view both are already on screen
             # in split view both sets of tabs are on screen, so there is
             # nothing to switch between
             count = ' %d' % len(self.big_terms) if self.big_terms else ''
@@ -1269,8 +1274,10 @@ class App(object):
             active_i = self.active
             marks = [ed.doc.dirty for ed in self.editors]
             # a file from outside the project is named in italics
-            styles = [ITALIC if self.outside_project(getattr(ed, 'path', None))
-                      else 0 for ed in self.editors]
+            styles = [(ITALIC if self.outside_project(getattr(ed, 'path', None))
+                       else 0) | (STRIKE if getattr(ed.doc, 'disk_missing', False)
+                                  else 0)
+                      for ed in self.editors]
         # ' name* M x ' - the marker and git slots keep their width so that
         # tabs never jump about as files change underneath them
         marks_git = self.tab_git_marks() if not terminals else [None] * len(names)
@@ -1581,7 +1588,7 @@ class App(object):
             self.review_key(key, combo)
             return
         if combo == 'f10':
-            self.open_review()
+            self.toggle_review()
             return
         if combo in ('f6', 'shift+f6'):
             self.cycle_focus(back=key.shift)
@@ -1887,11 +1894,24 @@ class App(object):
         if self.review.on_key(key):
             self.need_render = True
 
+    def track_pointer(self, on):
+        """Hear the mouse move, which the terminal only reports when asked.
+
+        Only while a menu is open: the rest of the time it is traffic for
+        nothing, and it stops the terminal's own selection working.
+        """
+        try:
+            self.out.write('\x1b[?1003h' if on else '\x1b[?1003l')
+            self.out.flush()
+        except Exception:
+            pass
+
     def open_menu(self, name, x=None):
         """Drop one of the menus open under its name."""
         if self.menu_open == name:
             self.menu_open = None
             self.overlay = None
+            self.track_pointer(False)
             self.need_render = True
             return
         items = self.menu_items(name)
@@ -1906,6 +1926,7 @@ class App(object):
         self.menu_open = name
         self.overlay = menus.Dropdown(self, name, x, self.rects['switch'].y + 1,
                                       items)
+        self.track_pointer(True)
         self.need_render = True
 
     def open_menu_beside(self, name, delta):
@@ -1934,9 +1955,16 @@ class App(object):
                 (tick(self.split) + 'Split view', 'f5', self.toggle_split),
                 (tick(self.show_tree) + 'Explorer', 'f12', self.toggle_tree),
                 menus.SEPARATOR,
-                ('Git review', 'f10', self.open_review),
+                (tick(self.review is not None) + 'Git review', 'f10',
+                 self.toggle_review),
             ]
         return None
+
+    def toggle_review(self):
+        """In and out of the review, from the same place in the menu."""
+        if self.review is not None:
+            return self.close_review()
+        return self.open_review()
 
     def browse_files(self):
         """Open File...: look around the machine and pick one."""
