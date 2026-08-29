@@ -6,6 +6,19 @@ Versions are tagged in git as `v0.1.0` and so on, and the installer takes one:
 curl -fsSL https://raw.githubusercontent.com/switch-to-tide/tide/main/install.sh | sh -s -- 0.1.0
 ```
 
+## 0.1.30 — 2026-08-29
+
+- Writing a frame can no longer spin or hang. Waiting for room to write now
+  waits on the terminal's input alone for twenty milliseconds at a time - a
+  full terminal can claim to be ready for more, and believing it meant
+  spinning at full tilt - and a frame the terminal will not take within two
+  seconds is abandoned rather than waited on, with the next frame drawn from
+  scratch.
+- `kill -USR1 <pid>` from another terminal writes a traceback to
+  `~/.config/tide/stuck.log` saying exactly what tide is doing. If the screen
+  ever stops answering, that says whether tide is stuck or the terminal is,
+  which is not something that can be told from the outside.
+
 ## 0.1.29 — 2026-08-29
 
 - **Hover in the menus costs nothing.** A report of the pointer moving now

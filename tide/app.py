@@ -2283,7 +2283,29 @@ class App(object):
         """SIGHUP/SIGTERM (the window closed, or someone killed us)."""
         self.running = False
 
+    def stuck_report(self):
+        """Where tide is, right now, written where it can be read afterwards.
+
+        If the screen ever stops answering, `kill -USR1 <pid>` from another
+        terminal leaves a traceback in this file saying exactly what tide was
+        doing - which beats guessing at it from the outside.
+        """
+        import faulthandler
+        path = os.path.join(os.path.dirname(settings_store.config_path()),
+                            'stuck.log')
+        try:
+            directory = os.path.dirname(path)
+            if directory and not os.path.isdir(directory):
+                os.makedirs(directory)
+            self._stuck_file = open(path, 'a')
+            faulthandler.enable(self._stuck_file)
+            faulthandler.register(signal.SIGUSR1, file=self._stuck_file,
+                                  all_threads=True, chain=False)
+        except Exception:
+            pass                        # a diagnostic is never worth a crash
+
     def run(self):
+        self.stuck_report()
         try:
             signal.signal(signal.SIGWINCH, self._on_winch)
         except (ValueError, AttributeError):
@@ -2393,6 +2415,10 @@ class App(object):
                     self.handle_paste(ev)
                 if not self.running:
                     break
+        if getattr(self.out, 'stalled', False):
+            self.out.stalled = False
+            self.screen.prev = None      # the terminal missed a frame: redraw
+            self.need_render = True
         self.hover_tick()
         if self._tracking and not isinstance(self.overlay, menus.Dropdown):
             self.track_pointer(False)   # nothing is listening: stop the reports

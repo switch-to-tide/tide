@@ -568,6 +568,8 @@ HELP_TEXT = [
         ('tide --remove-session NAME', 'forget one (it asks first)'),
         ('tide --remove-all-sessions', 'forget all of them (it asks first)'),
         ('tide --mouse-check', 'what this terminal reports as you move'),
+        ('kill -USR1 <pid>', 'if tide ever stops answering: writes'),
+        ('  ', '~/.config/tide/stuck.log saying where it is'),
         ('tide --update [VERSION]', 'pull the newest code, or a version'),
         ('tide --version', 'which version this is'),
         ('tide --theme NAME', 'a palette for this session only'),

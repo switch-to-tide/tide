@@ -10,6 +10,7 @@ import os
 import select
 import sys
 import termios
+import time
 import tty
 import unicodedata
 
@@ -193,7 +194,10 @@ class Out(object):
     terminal is trying to say, hand it to `sink`, and carry on with the frame.
     """
 
+    PATIENCE = 2.0                # seconds to spend on one frame, at most
+
     def __init__(self, stream, in_fd=None, sink=None):
+        self.stalled = False      # a frame we gave up on; redraw everything
         self.stream = stream
         self.fd = stream.fileno()
         self.in_fd = in_fd
@@ -212,22 +216,36 @@ class Out(object):
 
     def write(self, text):
         data = text.encode('utf-8', 'replace') if isinstance(text, str) else text
+        deadline = time.time() + self.PATIENCE
         while data:
             try:
                 data = data[os.write(self.fd, data):]
+                continue
             except (BlockingIOError, InterruptedError):
-                self._breathe()
+                pass
             except OSError:
                 return                    # the terminal has gone
+            if time.time() > deadline:
+                # it has not taken a byte for seconds. Give up on this frame
+                # rather than sit here: the next one is drawn from scratch
+                self.stalled = True
+                return
+            self._breathe()
 
     def _breathe(self):
-        """Wait for room to write, listening while we wait."""
+        """Wait a moment for room, listening to the terminal while we wait.
+
+        The wait is on input alone with a short timeout, never on the terminal
+        saying it is ready to be written to - a full tty can claim to be
+        writable, and believing it would spin here at full tilt.
+        """
         watch = [self.in_fd] if self.in_fd is not None else []
         try:
-            readable, _w, _x = select.select(watch, [self.fd], [], 0.1)
+            readable = select.select(watch, [], [], 0.02)[0]
         except (OSError, ValueError):
+            time.sleep(0.02)
             return
-        if self.in_fd in readable and self.sink is not None:
+        if readable and self.sink is not None:
             try:
                 chunk = os.read(self.in_fd, 65536)
             except OSError:
