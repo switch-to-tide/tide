@@ -157,6 +157,92 @@ def update(version):
     return 0
 
 
+def _confirm(question):
+    """y/n on the terminal; anything else is no."""
+    try:
+        answer = input('%s [y/N] ' % question)
+    except (EOFError, KeyboardInterrupt):
+        sys.stdout.write('\n')
+        return False
+    return answer.strip().lower() in ('y', 'yes')
+
+
+def run_session_command(args):
+    """--list-sessions, --remove-session and --remove-all-sessions."""
+    from . import sessions
+    if args.list_sessions:
+        names = sessions.names()
+        if not names:
+            sys.stdout.write('no saved sessions yet - Tide > Save to named '
+                             'session, or  tide --new-session NAME\n')
+            return 0
+        for name in names:
+            data = sessions.load(name) or {}
+            where = sessions.busy(name)
+            sys.stdout.write('%-20s %s%s\n' % (
+                name, data.get('root', '?'),
+                ('   [%s]' % where) if where else ''))
+        return 0
+    if args.remove_all_sessions:
+        names = sessions.names()
+        if not names:
+            sys.stdout.write('there are no saved sessions.\n')
+            return 0
+        if not _confirm('Forget all %d saved sessions?' % len(names)):
+            sys.stdout.write('left alone.\n')
+            return 0
+        sys.stdout.write('forgot %d session(s).\n' % sessions.remove_all())
+        return 0
+    name = args.remove_session
+    if not sessions.exists(name):
+        sys.stderr.write('no session called %s.\n' % name)
+        return 1
+    if not _confirm('Forget the session %s?' % name):
+        sys.stdout.write('left alone.\n')
+        return 0
+    sessions.remove(name)
+    sys.stdout.write('forgot %s.\n' % name)
+    return 0
+
+
+def open_saved_session(name):
+    """What --resume should open, or an exit code if it cannot."""
+    from . import sessions
+    data = sessions.load(name)
+    if data is None:
+        sys.stderr.write('no session called %s.\n' % name)
+        known = sessions.names()
+        if known:
+            sys.stderr.write('there is: %s\n' % ', '.join(known))
+        return 1
+    where = sessions.busy(name)
+    if where:
+        sys.stderr.write('the session %s is %s.\n' % (name, where))
+        return 1
+    root = data.get('root') or os.getcwd()
+    if not os.path.isdir(root):
+        sys.stderr.write('%s is gone, so %s cannot be opened there.\n'
+                         % (root, name))
+        return 1
+    files = [f for f in data.get('files') or [] if os.path.isfile(f)]
+    return {'root': root, 'files': files, 'active': data.get('active', 0),
+            'split': bool(data.get('split')),
+            'show_term': bool(data.get('show_term', True)),
+            'show_tree': bool(data.get('show_tree', True))}
+
+
+def start_session_here(name):
+    """--new-session: a new name for this folder, or an exit code."""
+    from . import sessions
+    trouble = sessions.why_not(name)
+    if not trouble and (sessions.exists(name) or sessions.busy(name)):
+        trouble = 'there is already a session called %s' % name
+    if trouble:
+        sys.stderr.write('%s.\n' % trouble)
+        return 1
+    return 0
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     ap = argparse.ArgumentParser(
@@ -183,6 +269,16 @@ def main(argv=None):
     ap.add_argument('--update', nargs='?', const='', metavar='VERSION',
                     help='update the installed copy, to the newest code or to '
                          'a version, and exit')
+    ap.add_argument('--list-sessions', action='store_true',
+                    help='name every saved session, and where it lives')
+    ap.add_argument('--resume', metavar='SESSION',
+                    help='open a saved session: its folder and its files')
+    ap.add_argument('--new-session', metavar='SESSION',
+                    help='start a session of that name here, and remember it')
+    ap.add_argument('--remove-session', metavar='SESSION',
+                    help='forget a saved session (asks first)')
+    ap.add_argument('--remove-all-sessions', action='store_true',
+                    help='forget every saved session (asks first)')
     ap.add_argument('--appearance', default=None, choices=['classic', 'modern'],
                     help='floating boxes (modern), or the deprecated flush '
                          'panes (classic)')
@@ -213,9 +309,22 @@ def main(argv=None):
             sys.stderr.write('could not listen on %d: %s\n' % (port, exc))
             return 1
         return 0
+    if (args.list_sessions or args.remove_all_sessions
+            or args.remove_session is not None):
+        return run_session_command(args)
     if args.audio_check is not None:
         from .audio.check import run as audio_check
         return audio_check(args.audio_check or None)
+
+    resume = None
+    if args.resume is not None:
+        resume = open_saved_session(args.resume)
+        if isinstance(resume, int):
+            return resume
+    if args.new_session is not None:
+        trouble = start_session_here(args.new_session)
+        if trouble:
+            return trouble
 
     root = None
     files = []
@@ -231,7 +340,17 @@ def main(argv=None):
         sys.stderr.write('tide needs an interactive terminal.\n')
         return 2
 
+    if resume:
+        root, files = resume['root'], list(resume['files'])
+
     app = App(root=root, paths=[])
+    name = args.resume or args.new_session
+    if name:
+        app.session = name
+    if resume:
+        app.show_term = resume['show_term']
+        app.show_tree = resume['show_tree']
+        app.split = resume['split']
     if args.no_terminal:
         app.show_term = False
     if args.no_tree:
@@ -256,6 +375,10 @@ def main(argv=None):
         theme.apply(args.theme, look)
     for f in files:
         app.open_file(f)
+    if resume and 0 <= resume.get('active', 0) < len(app.editors):
+        app.active = resume['active']
+    if name:
+        app.enter_session(name)
     try:
         app.run()
     except KeyboardInterrupt:

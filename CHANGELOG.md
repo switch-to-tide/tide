@@ -6,6 +6,20 @@ Versions are tagged in git as `v0.1.0` and so on, and the installer takes one:
 curl -fsSL https://raw.githubusercontent.com/switch-to-tide/tide/main/install.sh | sh -s -- 0.1.0
 ```
 
+## 0.1.22 — 2026-08-29
+
+- **Named sessions.** *Tide > Save to named session...* remembers where you
+  are working, which documents are open and how the panes are set; the item is
+  greyed out once the session has a name, and *Rename session...* takes over.
+  From a terminal: `tide --resume NAME` opens that folder with those files
+  again, `tide --new-session NAME` names the folder you are in, and
+  `tide --list-sessions`, `tide --remove-session NAME` and
+  `tide --remove-all-sessions` (both ask first) manage them. Shells are not
+  kept - a session is files and panes. A session already open somewhere else
+  will not open twice, and says where it is.
+- The Help screen (`f1`) now lists the terminal commands as well as the keys,
+  and scrolls, since there is more of it than fits.
+
 ## 0.1.21 — 2026-08-29
 
 - The menus keep the top left corner to themselves. With the explorer closed

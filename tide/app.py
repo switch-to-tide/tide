@@ -14,6 +14,7 @@ from .diff import DiffView, buffer_source, disk_source, head_source, rev_source
 from .filetree import FileTree, IGNORE_DIRS, IGNORE_FILES
 from .git import Git
 from . import chrome
+from . import sessions
 from . import menu as menus
 from . import names as tabnames
 from .keys import ALT, CTRL, SHIFT, Decoder, Key, Mouse, Paste
@@ -111,6 +112,7 @@ class App(object):
         self._shown_tab = {}
         self._file_cache = None
         self.rects = {}
+        self.session = None          # the named session this is, if any
         for p in paths:
             self.open_file(p)
         if not self.editors:
@@ -1951,6 +1953,11 @@ class App(object):
                 menus.SEPARATOR,
                 ('Open File...', 'ctrl+o', self.browse_files),
                 menus.SEPARATOR,
+                ('Save to named session...', '',
+                 None if self.session else self.name_session),
+                ('Rename session...', self.session or '',
+                 self.rename_session if self.session else None),
+                menus.SEPARATOR,
                 ('Quit', 'ctrl+q', self.quit),
             ]
         if name == 'View':
@@ -2057,6 +2064,81 @@ class App(object):
                     self.recheck_disk_soon()
                 return
 
+    # ---------------- named sessions ----------------
+    def session_state(self):
+        """What this session is: where, which documents, how the panes are."""
+        files = []
+        for tab in self.editors:
+            path = getattr(tab, 'path', None)
+            if path and not tab.is_diff and not getattr(tab, 'is_audio', False):
+                files.append(os.path.abspath(path))
+        here = getattr(self.editor, 'path', None)
+        return {'root': self.root, 'files': files,
+                'active': files.index(os.path.abspath(here))
+                if here and os.path.abspath(here) in files else 0,
+                'split': bool(self.split), 'show_term': bool(self.show_term),
+                'show_tree': bool(self.show_tree)}
+
+    def save_session(self):
+        """Keep the named session up to date; unnamed sessions keep nothing."""
+        if self.session:
+            sessions.save(self.session, self.session_state())
+
+    def enter_session(self, name):
+        """This is now that session: take the lock and write it down."""
+        self.session = name
+        sessions.claim(name)
+        self.save_session()
+
+    def name_session(self):
+        """Save what is open as a session with a name of its own."""
+        if self.session:
+            return
+
+        def accept(text):
+            name = (text or '').strip()
+            trouble = sessions.why_not(name)
+            if not trouble and (sessions.exists(name) or sessions.busy(name)):
+                trouble = 'there is already a session called %s' % name
+            if trouble:
+                self.overlay.info = trouble
+                self.need_render = True
+                return 'keep'
+            self.enter_session(name)
+            self.status('session %s - reopen with  tide --resume %s'
+                        % (name, name))
+        self.overlay = Prompt('Save to named session:', on_accept=accept,
+                              info='letters, digits, dot, dash, underscore')
+        self.need_render = True
+
+    def rename_session(self):
+        """Give the session a different name, if nothing else has it."""
+        if not self.session:
+            return
+
+        def accept(text):
+            name = (text or '').strip()
+            trouble = sessions.why_not(name)
+            if not trouble and name != self.session and (
+                    sessions.exists(name) or sessions.busy(name)):
+                trouble = 'there is already a session called %s' % name
+            if trouble:
+                self.overlay.info = trouble
+                self.need_render = True
+                return 'keep'
+            if name == self.session:
+                return
+            self.save_session()
+            if not sessions.rename(self.session, name):
+                self.overlay.info = 'could not rename it'
+                self.need_render = True
+                return 'keep'
+            self.session = name
+            self.status('session renamed to %s' % name)
+        self.overlay = Prompt('Rename session:', text=self.session,
+                              on_accept=accept)
+        self.need_render = True
+
     def quit(self):
         self.autosave_flush()
         dirty = [e for e in self.editors if e.doc.dirty]
@@ -2129,6 +2211,10 @@ class App(object):
             for tab in self.editors:
                 if hasattr(tab, 'close'):
                     tab.close()          # no sound outlives the editor
+            if self.session:
+                # what was open is what you get back next time
+                self.save_session()
+                sessions.release(self.session)
 
     def tick(self, timeout=0.2):
         if self.resized:

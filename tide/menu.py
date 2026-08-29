@@ -47,14 +47,20 @@ class Dropdown(object):
         self.x = x
         self.y = y
         self.items = items            # (label, hint, action) or SEPARATOR
+                                      # an item with no action is greyed out
         self.index = self._first()
         self.rect = Rect(0, 0, 1, 1)
 
     def _first(self):
         for i, item in enumerate(self.items):
-            if item is not SEPARATOR:
+            if self.pickable(i):
                 return i
         return 0
+
+    def pickable(self, i):
+        """A separator, or something greyed out, is not to be landed on."""
+        item = self.items[i] if 0 <= i < len(self.items) else SEPARATOR
+        return item is not SEPARATOR and item[2] is not None
 
     def close(self):
         self.app.menu_open = None
@@ -64,17 +70,16 @@ class Dropdown(object):
     def choose(self, index):
         if not 0 <= index < len(self.items):
             return
-        item = self.items[index]
-        if item is SEPARATOR:
+        if not self.pickable(index):
             return
         self.close()
-        item[2]()
+        self.items[index][2]()
 
     def move(self, delta):
         i = self.index
         for _ in range(len(self.items)):
             i = (i + delta) % len(self.items)
-            if self.items[i] is not SEPARATOR:
+            if self.pickable(i):
                 self.index = i
                 return
 
@@ -106,8 +111,7 @@ class Dropdown(object):
     def on_mouse(self, ev):
         if ev.kind == 'move':
             index = self.y_to_index(ev.y)
-            if self.rect.contains(ev.x, ev.y) and 0 <= index < len(self.items) \
-                    and self.items[index] is not SEPARATOR \
+            if self.rect.contains(ev.x, ev.y) and self.pickable(index) \
                     and index != self.index:
                 self.index = index
                 self.app.need_render = True
@@ -154,12 +158,14 @@ class Dropdown(object):
                 screen.put(x + 1, row, '─' * (width - 2), fg=border,
                            bg=theme.PANEL_ALT, attr=DIM)
                 continue
-            label, hint, _action = item
+            label, hint, action = item
             chosen = i == self.index
+            off = action is None                    # there, but not for now
             bg = theme.TREE_SEL_BG if chosen else theme.PANEL_ALT
             screen.fill(x + 1, row, width - 2, 1, bg=bg)
-            screen.put(x + 2, row, label, fg=theme.FG, bg=bg,
-                       attr=BOLD if chosen else 0, max_x=x + width - 2)
+            screen.put(x + 2, row, label, fg=theme.FG_DIM if off else theme.FG,
+                       bg=bg, attr=DIM if off else (BOLD if chosen else 0),
+                       max_x=x + width - 2)
             if hint:
                 screen.put(x + width - 2 - len(hint), row, hint,
                            fg=theme.FG_DIM, bg=bg, max_x=x + width - 1)

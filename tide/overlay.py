@@ -468,18 +468,72 @@ HELP_TEXT = [
         ('f1', 'this help'),
         ('ctrl+q', 'quit'),
     ]),
+    ('Named sessions', [
+        ('Tide > Save to named...', 'remember this folder and these files'),
+        ('Tide > Rename session', 'the same session, a different name'),
+        ('(automatic)', 'a named session is written when you leave it'),
+        ('(shells)', 'are not kept: a session is files and panes'),
+    ]),
+    ('From the terminal', [
+        ('tide', 'open the folder you are in'),
+        ('tide FILE... DIR', 'open these, with that folder as the project'),
+        ('tide --new-session NAME', 'a session of that name, here'),
+        ('tide --resume NAME', 'that folder and those files again'),
+        ('tide --list-sessions', 'every saved session and where it lives'),
+        ('tide --remove-session NAME', 'forget one (it asks first)'),
+        ('tide --remove-all-sessions', 'forget all of them (it asks first)'),
+        ('tide --update [VERSION]', 'pull the newest code, or a version'),
+        ('tide --version', 'which version this is'),
+        ('tide --theme NAME', 'a palette for this session only'),
+        ('tide --no-tree, --no-terminal', 'start with that pane hidden'),
+        ('tide --no-autosave', 'ctrl+s only, for this session'),
+        ('tide --audio-check [FILE]', 'what will happen when sound is played'),
+        ('tide --audio-sink [PORT]', 'play what a tide over ssh sends here'),
+        ('tide --show-audio-pipe', 'how to connect that pipe, and its health'),
+        ('tide --help', 'all of it'),
+    ]),
 ]
 
 
 class Help(object):
+    """Every key and every command, in one scrolling list."""
+
+    def __init__(self):
+        self.top = 0
+        self.rows = 1          # how much of it fits, set while painting
+        self.length = 0
+
+    def scroll(self, delta):
+        self.top = max(0, min(self.top + delta, max(0, self.length - self.rows)))
+
     def on_key(self, key):
-        return 'close'
+        if key.name in ('down', 'right'):
+            self.scroll(1)
+        elif key.name in ('up', 'left'):
+            self.scroll(-1)
+        elif key.name == 'pagedown':
+            self.scroll(self.rows)
+        elif key.name == 'pageup':
+            self.scroll(-self.rows)
+        elif key.name == 'home':
+            self.top = 0
+        elif key.name == 'end':
+            self.scroll(self.length)
+        else:
+            return 'close'
+        return 'keep'
 
     def on_paste(self, text):
         pass
 
     def on_mouse(self, ev):
-        return 'close' if ev.kind == 'press' else True
+        if ev.kind == 'wheel_up':
+            self.scroll(-3)
+        elif ev.kind == 'wheel_down':
+            self.scroll(3)
+        elif ev.kind == 'press':
+            return 'close'
+        return True
 
     def render(self, screen, area):
         lines = []
@@ -492,11 +546,16 @@ class Help(object):
         h = min(len(lines) + 2, area.h - 2)
         x = area.x + (area.w - w) // 2
         y = area.y + max(0, (area.h - h) // 2)
+        self.length = len(lines)
+        self.rows = max(1, h - 1)
+        self.top = max(0, min(self.top, max(0, self.length - self.rows)))
         screen.fill(x, y, w, h, bg=theme.PANEL_ALT)
         screen.fill(x, y, w, 1, bg=theme.STATUS_ACC)
-        title = ' terminal_ide - keys (any key closes) '
+        more = self.length > self.rows
+        title = (' tide - keys and commands (arrows scroll, any key closes) '
+                 if more else ' tide - keys and commands (any key closes) ')
         screen.put(x + 1, y, title[:w - 2], fg=theme.STATUS_FG, bg=theme.STATUS_ACC, attr=BOLD)
-        for i, (kind, val) in enumerate(lines):
+        for i, (kind, val) in enumerate(lines[self.top:]):
             ry = y + 1 + i
             if ry >= y + h:
                 break

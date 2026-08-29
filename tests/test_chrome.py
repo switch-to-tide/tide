@@ -388,10 +388,10 @@ class TestTheMenus(unittest.TestCase):
     def test_tide_offers_settings_open_and_quit(self):
         menu = self.open_menu('Tide')
         labels = [item[0] for item in menu.items if item]
-        self.assertEqual(len(labels), 3)
         self.assertIn('Settings', labels[0])
         self.assertIn('Open File', labels[1])
-        self.assertIn('Quit', labels[2])
+        self.assertIn('session', ' '.join(labels))
+        self.assertIn('Quit', labels[-1])
 
     def test_view_offers_the_panes_and_the_review(self):
         menu = self.open_menu('View')
