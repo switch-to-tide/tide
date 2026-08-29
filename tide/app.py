@@ -31,7 +31,7 @@ MESSAGE_SECONDS = 6          # how long a status message stays on the bar
 MIN_TERM_H = 3
 DEFAULT_TERM_H = 12
 MENU_MAX_W = 46      # menus are all one width; a long name is cropped
-HOVER_GAP = 0.08     # how often an open menu catches up with the pointer
+HOVER_GAP = 0.03     # how often an open menu catches up with the pointer
 
 
 class App(object):
@@ -2351,6 +2351,8 @@ class App(object):
                 sessions.release(self.session)
 
     def tick(self, timeout=0.2):
+        if self._hover_at is not None:
+            timeout = min(timeout, HOVER_GAP)   # a pointer move is waiting
         if self.resized:
             self.resized = False
             self.check_resize()

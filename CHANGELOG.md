@@ -6,6 +6,12 @@ Versions are tagged in git as `v0.1.0` and so on, and the installer takes one:
 curl -fsSL https://raw.githubusercontent.com/switch-to-tide/tide/main/install.sh | sh -s -- 0.1.0
 ```
 
+## 0.1.32 — 2026-08-29
+
+- The highlight keeps up with the pointer: a menu catches up every 30
+  milliseconds rather than every 80, and tide no longer waits in its select
+  loop while a move is sitting there unshown.
+
 ## 0.1.31 — 2026-08-29
 
 - **Fixed the mouse dying after a menu was opened and closed.** Closing one
