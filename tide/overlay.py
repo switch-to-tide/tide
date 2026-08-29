@@ -551,7 +551,7 @@ HELP_TEXT = [
         ('View', 'the panes, split view, the git review'),
         ('Help', 'this'),
         ('click a name', 'opens that menu; another click closes it'),
-        ('drag along the bar', 'moves between them, as menus do'),
+        ('the pointer', 'follows your hand inside an open menu only'),
     ]),
     ('Named sessions', [
         ('Tide > Save to named...', 'remember this folder and these files'),
@@ -567,6 +567,7 @@ HELP_TEXT = [
         ('tide --list-sessions', 'every saved session and where it lives'),
         ('tide --remove-session NAME', 'forget one (it asks first)'),
         ('tide --remove-all-sessions', 'forget all of them (it asks first)'),
+        ('tide --mouse-check', 'what this terminal reports as you move'),
         ('tide --update [VERSION]', 'pull the newest code, or a version'),
         ('tide --version', 'which version this is'),
         ('tide --theme NAME', 'a palette for this session only'),

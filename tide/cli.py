@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 
 from . import __version__
 from . import theme
@@ -157,6 +158,73 @@ def update(version):
     return 0
 
 
+def mouse_check():
+    """What this terminal sends when asked to report the pointer moving.
+
+    The menus use that reporting to follow the pointer. Some terminals send
+    it far faster than anything can use, and this says so plainly rather than
+    finding out in the middle of a session.
+    """
+    import select
+    import termios
+    import tty
+    if not sys.stdin.isatty():
+        sys.stderr.write('--mouse-check needs a terminal.\n')
+        return 2
+    fd = sys.stdin.fileno()
+    saved = termios.tcgetattr(fd)
+    counts = {'moves': 0, 'other': 0, 'bytes': 0}
+    shapes = set()
+    try:
+        tty.setraw(fd)
+        sys.stdout.write('\x1b[?1000h\x1b[?1002h\x1b[?1006h\x1b[?1003h')
+        sys.stdout.write('\r\nMove the pointer around this window for five '
+                         'seconds...\r\n')
+        sys.stdout.flush()
+        end = time.time() + 5
+        while time.time() < end:
+            ready, _, _ = select.select([fd], [], [], max(0, end - time.time()))
+            if not ready:
+                continue
+            data = os.read(fd, 65536)
+            counts['bytes'] += len(data)
+            for piece in data.split(b'\x1b'):
+                if not piece:
+                    continue
+                if piece.startswith(b'[<'):
+                    code = piece[2:].split(b';')[0]
+                    shapes.add('SGR')
+                    if code.isdigit() and int(code) & 32:
+                        counts['moves'] += 1
+                    else:
+                        counts['other'] += 1
+                elif piece.startswith(b'[M'):
+                    shapes.add('X10')
+                    counts['other'] += 1
+    finally:
+        sys.stdout.write('\x1b[?1003l\x1b[?1002l\x1b[?1000l\x1b[?1006l')
+        sys.stdout.flush()
+        termios.tcsetattr(fd, termios.TCSADRAIN, saved)
+    rate = counts['moves'] / 5.0
+    print('')
+    print('reports of the pointer moving: %d in five seconds (%.0f a second)'
+          % (counts['moves'], rate))
+    print('other mouse reports:           %d' % counts['other'])
+    print('bytes from the terminal:       %d' % counts['bytes'])
+    print('encoding:                      %s'
+          % (', '.join(sorted(shapes)) or 'nothing arrived'))
+    if not counts['moves'] and not counts['other']:
+        print('\nThis terminal sent nothing at all: either the pointer never '
+              'moved over\nit, or it does not report the pointer. The menus '
+              'will not follow it here.')
+    elif rate > 200:
+        print('\nThat is a lot - more than tide can use. Turn Menu follows '
+              'mouse off in\nthe settings if the menus feel heavy here.')
+    else:
+        print('\nThat is a normal rate; the menus can follow the pointer here.')
+    return 0
+
+
 def _confirm(question):
     """y/n on the terminal; anything else is no."""
     try:
@@ -269,6 +337,9 @@ def main(argv=None):
     ap.add_argument('--update', nargs='?', const='', metavar='VERSION',
                     help='update the installed copy, to the newest code or to '
                          'a version, and exit')
+    ap.add_argument('--mouse-check', action='store_true',
+                    help='ask this terminal to report the pointer for five '
+                         'seconds and say what it sends')
     ap.add_argument('--list-sessions', action='store_true',
                     help='name every saved session, and where it lives')
     ap.add_argument('--resume', metavar='SESSION',
@@ -309,6 +380,8 @@ def main(argv=None):
             sys.stderr.write('could not listen on %d: %s\n' % (port, exc))
             return 1
         return 0
+    if args.mouse_check:
+        return mouse_check()
     if (args.list_sessions or args.remove_all_sessions
             or args.remove_session is not None):
         return run_session_command(args)

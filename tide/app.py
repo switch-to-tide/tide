@@ -30,6 +30,8 @@ MESSAGE_SECONDS = 6          # how long a status message stays on the bar
 MIN_TERM_H = 3
 DEFAULT_TERM_H = 12
 MENU_MAX_W = 46      # menus are all one width; a long name is cropped
+HOVER_GAP = 0.05     # at most twenty hover repaints a second
+MOTION_STORM = 400   # reports in one second that no hand can make
 
 
 class App(object):
@@ -85,6 +87,10 @@ class App(object):
         self.menu_spans = []
         self._menu_end = 0
         self._tracking = False
+        self.hover = True        # until a terminal proves it cannot
+        self._motion_second = 0.0
+        self._motion_count = 0
+        self._hover_paint = 0.0
         self._seen_tab = None        # the tab in front of us, and the one
         self._prev_tab = None        # before it, in each of the two groups
         self._seen_term = None
@@ -1728,11 +1734,25 @@ class App(object):
 
     def handle_mouse(self, ev):
         if ev.kind == 'move':
-            # only an open menu ever asked to hear this, and it arrives in
-            # floods: it must cost nothing when it changes nothing, and it
-            # must never reach the editor, the tree or a shell
-            if isinstance(self.overlay, menus.Dropdown):
-                self.overlay.on_mouse(ev)
+            # only an open menu ever asked to hear this. It arrives in floods,
+            # so it costs nothing when it changes nothing, never reaches the
+            # editor, the tree or a shell, and cannot repaint faster than
+            # HOVER_HZ. A terminal that sends more than a hand can produce
+            # loses the feature rather than the session
+            if not isinstance(self.overlay, menus.Dropdown):
+                return
+            now = time.time()
+            if now - self._motion_second >= 1.0:
+                self._motion_second, self._motion_count = now, 0
+            self._motion_count += 1
+            if self._motion_count > MOTION_STORM:
+                self.stop_hover()
+                return
+            was = self.overlay.index
+            self.overlay.on_mouse(ev)
+            if self.overlay.index != was and now - self._hover_paint >= HOVER_GAP:
+                self._hover_paint = now
+                self.need_render = True
             return
         self.need_render = True
         if self.overlay is not None:
@@ -1920,6 +1940,13 @@ class App(object):
         if self.review.on_key(key):
             self.need_render = True
 
+    def stop_hover(self):
+        """A terminal drowning us in reports: keep the menus, lose the hover."""
+        self.track_pointer(False)
+        self.hover = False
+        self.status('menu hover off: this terminal reports the pointer far '
+                    'faster than tide can use - turn it back on in settings')
+
     def track_pointer(self, on):
         """Ask the terminal to report the pointer moving, or stop.
 
@@ -1927,7 +1954,7 @@ class App(object):
         report for every cell the pointer crosses, so it is asked for as
         narrowly as possible and turned off the moment the menu goes.
         """
-        on = bool(on) and (self.settings.get('menu_hover', True) if on else False)
+        on = bool(on) and self.hover and self.settings.get('menu_hover', True)
         if on == self._tracking:
             return
         self._tracking = on

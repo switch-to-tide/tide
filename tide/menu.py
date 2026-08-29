@@ -136,10 +136,9 @@ class Dropdown(object):
             self.app.need_render = True
             return True
         if ev.kind in ('move', 'drag'):
-            # the highlight follows the pointer, dragged or not, and moving
-            # on to another name up on the bar opens that one
-            if self.on_bar(ev):
-                return True
+            # the highlight follows the pointer inside this menu, and that is
+            # all it does: moving the pointer never opens another menu, so a
+            # hand crossing the bar cannot set one going after another
             index = self.y_to_index(ev.y)
             if self.rect.contains(ev.x, ev.y) and self.pickable(index) \
                     and index != self.index:
@@ -160,23 +159,18 @@ class Dropdown(object):
         return True
 
     def on_bar(self, ev):
-        """On a name up on the bar, with this menu open.
+        """A click on a name up on the bar, with this menu open.
 
-        A click does what a click on that name always does - open that menu,
-        close this one if it is the same name, or press that button. Dragging
-        only ever moves between menus, so a hand sweeping the bar can never
-        set off a button.
+        It does what a click on that name always does: open that menu, close
+        this one if it is the same name, or press that button. Only a click -
+        the pointer merely passing over the bar changes nothing.
         """
-        if ev.y != self.y - 1:
+        if ev.y != self.y - 1 or ev.kind != 'press':
             return False
         for x1, x2, name in self.app.menu_spans:
-            if not x1 <= ev.x < x2:
-                continue
-            if ev.kind == 'press':
+            if x1 <= ev.x < x2:
                 self.app.open_menu(name, x1)
-            elif name != self.name and self.app.menu_items(name) is not None:
-                self.app.open_menu(name, x1)
-            return True
+                return True
         return False
 
     def y_to_index(self, y):

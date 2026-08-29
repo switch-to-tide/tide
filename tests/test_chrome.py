@@ -452,14 +452,14 @@ class TestTheMenus(unittest.TestCase):
         self.app.handle_key(Key('up'))
         self.assertEqual(menu.index, first)
 
-    def test_the_highlight_follows_a_drag(self):
+    def test_the_highlight_follows_the_pointer_inside_the_menu(self):
         from tide.keys import Mouse
         menu = self.open_menu('View')
         rows = [i for i, item in enumerate(menu.items) if item is not None]
-        target = rows[2]
-        self.app.handle_mouse(Mouse('drag', menu.rect.x + 3,
-                                    menu.rect.y + 1 + target))
-        self.assertEqual(menu.index, target)
+        for target in (rows[2], rows[0], rows[-1]):
+            self.app.handle_mouse(Mouse('move', menu.rect.x + 3,
+                                        menu.rect.y + 1 + target))
+            self.assertEqual(menu.index, target)
 
     def test_split_view_never_offers_the_editor_terminal_switch(self):
         self.app.split = True
@@ -499,20 +499,29 @@ class TestTheMenus(unittest.TestCase):
         self.assertEqual(self.app.menu_open, 'View')
         self.assertEqual(self.app.overlay.name, 'View')
 
-    def test_dragging_along_the_bar_moves_between_menus(self):
+    def test_the_pointer_never_opens_another_menu(self):
+        """Hover belongs inside the open menu; only a click moves along."""
         from tide.keys import Mouse
         self.open_menu('Tide')
-        span = next(s for s in self.app.menu_spans if s[2] == 'View')
-        self.app.handle_mouse(Mouse('drag', span[0] + 1, 0))
-        self.app.render()
-        self.assertEqual(self.app.menu_open, 'View')
+        for name in ('View', 'Help', 'File'):
+            span = next(s for s in self.app.menu_spans if s[2] == name)
+            for kind in ('move', 'drag'):
+                self.app.handle_mouse(Mouse(kind, span[0] + 1, 0))
+                self.assertEqual(self.app.menu_open, 'Tide',
+                                 '%s over %s opened it' % (kind, name))
 
-    def test_dragging_over_help_does_not_set_it_off(self):
+    def test_a_storm_of_reports_costs_the_hover_not_the_session(self):
         from tide.keys import Mouse
-        self.open_menu('Tide')
-        span = next(s for s in self.app.menu_spans if s[2] == 'Help')
-        self.app.handle_mouse(Mouse('drag', span[0] + 1, 0))
-        self.assertEqual(self.app.menu_open, 'Tide', 'a button went off mid-drag')
+        menu = self.open_menu('View')
+        for i in range(600):
+            self.app.handle_mouse(Mouse('move', menu.rect.x + 3,
+                                        menu.rect.y + 1 + (i % 3)))
+        self.assertFalse(self.app.hover, 'a storm was not noticed')
+        self.assertIsNotNone(self.app.overlay, 'the menu was lost with it')
+        self.assertIn('hover off', self.app.message)
+        self.app.render()
+        self.assertEqual(self.app.out.getvalue().rsplit('[?1003', 1)[-1][:1],
+                         'l', 'the reports were not turned off')
 
     def test_the_file_menu_goes_to_a_document(self):
         self.app.open_file(os.path.join(self.tmp, 'sub', 'deep.py'))

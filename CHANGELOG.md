@@ -6,6 +6,21 @@ Versions are tagged in git as `v0.1.0` and so on, and the installer takes one:
 curl -fsSL https://raw.githubusercontent.com/switch-to-tide/tide/main/install.sh | sh -s -- 0.1.0
 ```
 
+## 0.1.28 — 2026-08-29
+
+- **The pointer only ever moves the highlight inside the menu that is open.**
+  It never opens another one - a click does that - so a hand crossing the bar
+  cannot set one menu going after another.
+- Hover repaints at most twenty times a second, and a terminal that reports
+  the pointer faster than any hand can move it (400 reports in a second) has
+  the hover switched off with a line in the status bar, rather than taking
+  the session with it. **Menu follows mouse** in the settings turns it off
+  outright.
+- `tide --mouse-check` asks this terminal to report the pointer for five
+  seconds and says what came back - how many reports a second, in which
+  encoding - so a terminal that cannot do it can be told apart from one that
+  can, without finding out mid-session.
+
 ## 0.1.27 — 2026-08-29
 
 - The highlight follows the pointer in an open menu again, and moving on to
