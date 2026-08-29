@@ -136,14 +136,7 @@ class Dropdown(object):
             self.app.need_render = True
             return True
         if ev.kind in ('move', 'drag'):
-            # the highlight follows the pointer inside this menu, and that is
-            # all it does: moving the pointer never opens another menu, so a
-            # hand crossing the bar cannot set one going after another
-            index = self.y_to_index(ev.y)
-            if self.rect.contains(ev.x, ev.y) and self.pickable(index) \
-                    and index != self.index:
-                self.index = index
-                self.app.need_render = True
+            self.hover(ev.x, ev.y)
             return True
         if ev.kind not in ('press', 'release'):
             return True
@@ -157,6 +150,18 @@ class Dropdown(object):
         if ev.kind == 'press':
             self.choose(self.y_to_index(ev.y))
         return True
+
+    def hover(self, x, y):
+        """Put the highlight where the pointer is, if it is over an item.
+
+        Only inside this menu: the pointer never opens another one, so a hand
+        crossing the bar cannot set one going after the next.
+        """
+        index = self.y_to_index(y)
+        if self.rect.contains(x, y) and self.pickable(index) \
+                and index != self.index:
+            self.index = index
+            self.app.need_render = True
 
     def on_bar(self, ev):
         """A click on a name up on the bar, with this menu open.

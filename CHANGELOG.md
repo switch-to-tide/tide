@@ -6,6 +6,20 @@ Versions are tagged in git as `v0.1.0` and so on, and the installer takes one:
 curl -fsSL https://raw.githubusercontent.com/switch-to-tide/tide/main/install.sh | sh -s -- 0.1.0
 ```
 
+## 0.1.29 — 2026-08-29
+
+- **Hover in the menus costs nothing.** A report of the pointer moving now
+  stores a pair of numbers and stops there - no work, no repaint. The open
+  menu catches up with where the pointer is a dozen times a second, which is
+  what a menu is worth: five thousand reports take a millisecond and a half
+  between them, and ask for no repainting of their own.
+- **Fixed the freeze for good, whatever caused it.** Frames went out with one
+  blocking write. A terminal busy pushing input at us - mouse reports, a held
+  key - can stop reading, and then neither side can move: it will not read
+  until it has finished writing to us, and it cannot finish until we read.
+  tide now writes frames without blocking, and listens to the terminal while
+  it waits for room, so the two can never wedge each other again.
+
 ## 0.1.28 — 2026-08-29
 
 - **The pointer only ever moves the highlight inside the menu that is open.**

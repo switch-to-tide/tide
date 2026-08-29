@@ -20,7 +20,8 @@ from . import names as tabnames
 from .keys import ALT, CTRL, SHIFT, Decoder, Key, Mouse, Paste
 from .review import Review
 from .overlay import Choice, Confirm, Help, Prompt, SettingsPanel
-from .term import BOLD, DIM, ITALIC, STRIKE, RawTerminal, Rect, Screen
+from .term import (BOLD, DIM, ITALIC, STRIKE, Out, RawTerminal, Rect,
+                   Screen)
 from .termpanel import TerminalPanel
 
 SIDEBAR_W = 26
@@ -30,8 +31,7 @@ MESSAGE_SECONDS = 6          # how long a status message stays on the bar
 MIN_TERM_H = 3
 DEFAULT_TERM_H = 12
 MENU_MAX_W = 46      # menus are all one width; a long name is cropped
-HOVER_GAP = 0.05     # at most twenty hover repaints a second
-MOTION_STORM = 400   # reports in one second that no hand can make
+HOVER_GAP = 0.08     # how often an open menu catches up with the pointer
 
 
 class App(object):
@@ -45,7 +45,16 @@ class App(object):
         if name != self.settings['theme']:
             self.settings['theme'] = name      # it was a palette classic had
         self.out = out or sys.stdout
+        self._pending = []           # input read while a frame was going out
         self.in_fd = in_fd if in_fd is not None else sys.stdin.fileno()
+        try:
+            live = self.out.isatty()
+        except Exception:
+            live = False
+        if live:
+            # frames go out without ever blocking us into a deadlock with a
+            # terminal that is busy talking to us
+            self.out = Out(self.out, self.in_fd, self._pending.append)
         self.editors = []
         self.active = 0
         self.git = Git(self.root)
@@ -87,10 +96,8 @@ class App(object):
         self.menu_spans = []
         self._menu_end = 0
         self._tracking = False
-        self.hover = True        # until a terminal proves it cannot
-        self._motion_second = 0.0
-        self._motion_count = 0
-        self._hover_paint = 0.0
+        self._hover_at = None    # where the pointer was last reported
+        self._hover_seen = 0.0
         self._seen_tab = None        # the tab in front of us, and the one
         self._prev_tab = None        # before it, in each of the two groups
         self._seen_term = None
@@ -1734,25 +1741,11 @@ class App(object):
 
     def handle_mouse(self, ev):
         if ev.kind == 'move':
-            # only an open menu ever asked to hear this. It arrives in floods,
-            # so it costs nothing when it changes nothing, never reaches the
-            # editor, the tree or a shell, and cannot repaint faster than
-            # HOVER_HZ. A terminal that sends more than a hand can produce
-            # loses the feature rather than the session
-            if not isinstance(self.overlay, menus.Dropdown):
-                return
-            now = time.time()
-            if now - self._motion_second >= 1.0:
-                self._motion_second, self._motion_count = now, 0
-            self._motion_count += 1
-            if self._motion_count > MOTION_STORM:
-                self.stop_hover()
-                return
-            was = self.overlay.index
-            self.overlay.on_mouse(ev)
-            if self.overlay.index != was and now - self._hover_paint >= HOVER_GAP:
-                self._hover_paint = now
-                self.need_render = True
+            # these arrive in floods, so one costs a pair of numbers and
+            # nothing else: where the pointer was. The menu catches up with it
+            # on a timer (see hover_tick), and nothing else in tide ever hears
+            # about the pointer moving
+            self._hover_at = (ev.x, ev.y)
             return
         self.need_render = True
         if self.overlay is not None:
@@ -1940,12 +1933,23 @@ class App(object):
         if self.review.on_key(key):
             self.need_render = True
 
-    def stop_hover(self):
-        """A terminal drowning us in reports: keep the menus, lose the hover."""
-        self.track_pointer(False)
-        self.hover = False
-        self.status('menu hover off: this terminal reports the pointer far '
-                    'faster than tide can use - turn it back on in settings')
+    def hover_tick(self):
+        """Let the open menu catch up with the pointer, a few times a second.
+
+        Following it report by report would mean a repaint per twitch of the
+        hand; a menu is not worth that, and a tenth of a second is not a wait
+        anyone notices.
+        """
+        if self._hover_at is None:
+            return
+        now = time.time()
+        if now - self._hover_seen < HOVER_GAP:
+            return
+        x, y = self._hover_at
+        self._hover_at = None
+        self._hover_seen = now
+        if isinstance(self.overlay, menus.Dropdown):
+            self.overlay.hover(x, y)
 
     def track_pointer(self, on):
         """Ask the terminal to report the pointer moving, or stop.
@@ -1954,7 +1958,7 @@ class App(object):
         report for every cell the pointer crosses, so it is asked for as
         narrowly as possible and turned off the moment the menu goes.
         """
-        on = bool(on) and self.hover and self.settings.get('menu_hover', True)
+        on = bool(on) and self.settings.get('menu_hover', True)
         if on == self._tracking:
             return
         self._tracking = on
@@ -2312,6 +2316,8 @@ class App(object):
             for tab in self.editors:
                 if hasattr(tab, 'close'):
                     tab.close()          # no sound outlives the editor
+            if isinstance(self.out, Out):
+                self.out.restore()
             if self.session:
                 # what was open is what you get back next time
                 self.save_session()
@@ -2357,14 +2363,21 @@ class App(object):
                     break
             if visible:
                 self.need_render = True
-        if self.in_fd in ready:
-            try:
-                data = os.read(self.in_fd, 65536)
-            except OSError:
-                data = b''
-            if not data:
-                self.running = False
-                return
+        if self._pending or self.in_fd in ready:
+            data = b''.join(self._pending)     # heard while a frame went out
+            del self._pending[:]
+            if self.in_fd in ready:
+                try:
+                    data += os.read(self.in_fd, 65536)
+                except BlockingIOError:
+                    pass                       # nothing there after all
+                except OSError:
+                    self.running = False
+                    return
+                else:
+                    if not data:
+                        self.running = False   # the terminal has gone
+                        return
             events = list(self.decoder.feed(data))
             for i, ev in enumerate(events):
                 if (isinstance(ev, Mouse) and ev.kind == 'move'
@@ -2380,6 +2393,7 @@ class App(object):
                     self.handle_paste(ev)
                 if not self.running:
                     break
+        self.hover_tick()
         if self._tracking and not isinstance(self.overlay, menus.Dropdown):
             self.track_pointer(False)   # nothing is listening: stop the reports
         if self._audio_busy():

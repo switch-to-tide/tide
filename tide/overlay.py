@@ -551,7 +551,7 @@ HELP_TEXT = [
         ('View', 'the panes, split view, the git review'),
         ('Help', 'this'),
         ('click a name', 'opens that menu; another click closes it'),
-        ('the pointer', 'follows your hand inside an open menu only'),
+        ('the pointer', 'moves the highlight inside an open menu only'),
     ]),
     ('Named sessions', [
         ('Tide > Save to named...', 'remember this folder and these files'),

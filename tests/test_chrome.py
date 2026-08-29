@@ -453,12 +453,15 @@ class TestTheMenus(unittest.TestCase):
         self.assertEqual(menu.index, first)
 
     def test_the_highlight_follows_the_pointer_inside_the_menu(self):
+        import time
         from tide.keys import Mouse
         menu = self.open_menu('View')
         rows = [i for i, item in enumerate(menu.items) if item is not None]
         for target in (rows[2], rows[0], rows[-1]):
             self.app.handle_mouse(Mouse('move', menu.rect.x + 3,
                                         menu.rect.y + 1 + target))
+            time.sleep(0.09)              # it catches up a few times a second
+            self.app.hover_tick()
             self.assertEqual(menu.index, target)
 
     def test_split_view_never_offers_the_editor_terminal_switch(self):
@@ -510,18 +513,19 @@ class TestTheMenus(unittest.TestCase):
                 self.assertEqual(self.app.menu_open, 'Tide',
                                  '%s over %s opened it' % (kind, name))
 
-    def test_a_storm_of_reports_costs_the_hover_not_the_session(self):
+    def test_a_flood_of_reports_costs_nothing(self):
+        """A report is a pair of numbers; the menu catches up on a timer."""
         from tide.keys import Mouse
         menu = self.open_menu('View')
-        for i in range(600):
+        self.app.need_render = False
+        for i in range(2000):
             self.app.handle_mouse(Mouse('move', menu.rect.x + 3,
                                         menu.rect.y + 1 + (i % 3)))
-        self.assertFalse(self.app.hover, 'a storm was not noticed')
-        self.assertIsNotNone(self.app.overlay, 'the menu was lost with it')
-        self.assertIn('hover off', self.app.message)
-        self.app.render()
-        self.assertEqual(self.app.out.getvalue().rsplit('[?1003', 1)[-1][:1],
-                         'l', 'the reports were not turned off')
+        self.assertFalse(self.app.need_render,
+                         'motion reports asked for a repaint of their own')
+        self.app.hover_tick()
+        self.assertTrue(self.app.need_render, 'the menu never caught up')
+        self.assertIsNotNone(self.app.overlay)
 
     def test_the_file_menu_goes_to_a_document(self):
         self.app.open_file(os.path.join(self.tmp, 'sub', 'deep.py'))

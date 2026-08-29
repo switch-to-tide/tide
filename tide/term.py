@@ -5,7 +5,9 @@ diff against the previously flushed grid and emit only the runs that changed,
 which keeps redraws flicker-free and cheap enough for pure Python.
 """
 
+import fcntl
 import os
+import select
 import sys
 import termios
 import tty
@@ -178,6 +180,63 @@ class Screen(object):
         data = ''.join(buf)
         out.write(data)
         out.flush()
+
+
+class Out(object):
+    """Where the frames go: stdout, without the deadlock.
+
+    A terminal that is busy pushing input at us - mouse reports, a held key -
+    can stop reading what we send. One blocking write in the middle of a frame
+    then wedges both of us for good: it will not read until it has finished
+    writing, and it cannot finish writing until we read. So the descriptor is
+    non-blocking, and whenever it will not take any more we read whatever the
+    terminal is trying to say, hand it to `sink`, and carry on with the frame.
+    """
+
+    def __init__(self, stream, in_fd=None, sink=None):
+        self.stream = stream
+        self.fd = stream.fileno()
+        self.in_fd = in_fd
+        self.sink = sink
+        self.flags = fcntl.fcntl(self.fd, fcntl.F_GETFL)
+        fcntl.fcntl(self.fd, fcntl.F_SETFL, self.flags | os.O_NONBLOCK)
+
+    def restore(self):
+        try:
+            fcntl.fcntl(self.fd, fcntl.F_SETFL, self.flags)
+        except OSError:
+            pass
+
+    def fileno(self):
+        return self.fd
+
+    def write(self, text):
+        data = text.encode('utf-8', 'replace') if isinstance(text, str) else text
+        while data:
+            try:
+                data = data[os.write(self.fd, data):]
+            except (BlockingIOError, InterruptedError):
+                self._breathe()
+            except OSError:
+                return                    # the terminal has gone
+
+    def _breathe(self):
+        """Wait for room to write, listening while we wait."""
+        watch = [self.in_fd] if self.in_fd is not None else []
+        try:
+            readable, _w, _x = select.select(watch, [self.fd], [], 0.1)
+        except (OSError, ValueError):
+            return
+        if self.in_fd in readable and self.sink is not None:
+            try:
+                chunk = os.read(self.in_fd, 65536)
+            except OSError:
+                return
+            if chunk:
+                self.sink(chunk)
+
+    def flush(self):
+        pass
 
 
 class RawTerminal(object):
