@@ -67,9 +67,6 @@ class Dropdown(object):
     def close(self):
         self.app.menu_open = None
         self.app.overlay = None
-        # stop hearing the pointer move: outside a menu it is a flood of
-        # events for nothing, and the shell would be sent them too
-        self.app.track_pointer(False)
         self.app.need_render = True
 
     def choose(self, index):
@@ -137,14 +134,11 @@ class Dropdown(object):
             self.scroll(-2 if ev.kind == 'wheel_up' else 2)
             self.app.need_render = True
             return True
-        if ev.kind == 'move':
-            if ev.y == self.y - 1:
-                # along the bar with a menu down: the one under the pointer
-                for x1, x2, name in self.app.menu_spans:
-                    if x1 <= ev.x < x2 and name != self.name and \
-                            self.app.menu_items(name) is not None:
-                        self.app.open_menu(name, x1)   # a menu, not a button
-                        return True
+        if ev.kind in ('move', 'drag'):
+            # dragging is the only pointer movement tide hears about, and it
+            # behaves as a menu should: the highlight follows it, and moving
+            # on to another name opens that one
+            if self.on_bar(ev):
                 return True
             index = self.y_to_index(ev.y)
             if self.rect.contains(ev.x, ev.y) and self.pickable(index) \
@@ -156,12 +150,34 @@ class Dropdown(object):
             return True
         if not self.rect.contains(ev.x, ev.y):
             if ev.kind == 'press':
+                if self.on_bar(ev):
+                    return True       # one click moves along the bar
                 self.close()
                 return False          # the click belongs to whatever is under it
             return True
         if ev.kind == 'press':
             self.choose(self.y_to_index(ev.y))
         return True
+
+    def on_bar(self, ev):
+        """On a name up on the bar, with this menu open.
+
+        A click does what a click on that name always does - open that menu,
+        close this one if it is the same name, or press that button. Dragging
+        only ever moves between menus, so a hand sweeping the bar can never
+        set off a button.
+        """
+        if ev.y != self.y - 1:
+            return False
+        for x1, x2, name in self.app.menu_spans:
+            if not x1 <= ev.x < x2:
+                continue
+            if ev.kind == 'press':
+                self.app.open_menu(name, x1)
+            elif name != self.name and self.app.menu_items(name) is not None:
+                self.app.open_menu(name, x1)
+            return True
+        return False
 
     def y_to_index(self, y):
         return y - self.rect.y - 1 + self.top

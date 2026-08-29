@@ -841,9 +841,11 @@ class Editor(object):
         # the whole file squeezed into one column at the far right, showing
         # where git says it has changed, and beside it a one column scrollbar
         # - that one only when there is more document than viewport
-        self.ov_x = (rect.x2 - 1 if self.git_marks and rect.w > self.gutter + 5
+        self.ov_x = (rect.x2 - 1 if self.git_marks and rect.w > self.gutter + 6
                      else None)
-        edge = 1 if self.ov_x is not None else 0
+        # a blank column between the two, so the ruler is still readable
+        # where the scrollbar's thumb happens to be beside it
+        edge = 2 if self.ov_x is not None else 0
         show_bar = nlines > rect.h and rect.w > self.gutter + 4 + edge
         self.sb_x = rect.x2 - 1 - edge if show_bar else None
         self.text_rect = Rect(rect.x + self.gutter, rect.y,

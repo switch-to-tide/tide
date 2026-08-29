@@ -6,6 +6,21 @@ Versions are tagged in git as `v0.1.0` and so on, and the installer takes one:
 curl -fsSL https://raw.githubusercontent.com/switch-to-tide/tide/main/install.sh | sh -s -- 0.1.0
 ```
 
+## 0.1.26 — 2026-08-29
+
+- **tide no longer asks the terminal to report the pointer moving.** The
+  hover-follows-the-mouse highlight in the menus needed any-motion reporting,
+  which sends tide an event for every pixel the pointer crosses - enough to
+  wedge the screen. It is gone, and tide now clears that mode when it starts
+  as well as when it leaves, so a terminal left in it by an earlier version
+  comes back to normal.
+- Menus behave without it: **one click moves from one menu to another**,
+  clicking the open one closes it, and dragging along the bar or down a menu
+  moves the highlight the way a menu should - all from the button-drag
+  reporting tide already used.
+- A blank column between the scrollbar and the change ruler, so a change is
+  still visible where the scrollbar's thumb sits beside it.
+
 ## 0.1.25 — 2026-08-29
 
 - **Fixed the editor going sluggish after using a menu.** A menu asks the

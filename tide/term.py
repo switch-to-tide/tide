@@ -202,7 +202,10 @@ class RawTerminal(object):
         except termios.error:
             self.saved = None
         # alt screen, hide cursor, SGR mouse (press/drag/release), bracketed paste
-        self.out.write('\x1b[?1049h\x1b[?25l\x1b[?1000h\x1b[?1002h\x1b[?1006h\x1b[?2004h')
+        # 1003l: any-motion reporting is never wanted, and an older tide or
+        # another program may have left it on
+        self.out.write('\x1b[?1049h\x1b[?25l\x1b[?1003l\x1b[?1000h'
+                       '\x1b[?1002h\x1b[?1006h\x1b[?2004h')
         self.out.flush()
         return self
 

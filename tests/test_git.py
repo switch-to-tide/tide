@@ -223,11 +223,12 @@ class TestOverviewRuler(unittest.TestCase):
                  theme.GIT_LINE_DELETED: 'R'}
         top = session.BODY_ROW if top is None else top
         bar = (theme.SCROLL_TRACK, theme.SCROLL_THUMB, theme.SCROLL_THUMB_HL)
-        for x in range(width - 1, width - 5, -1):
+        for x in range(width - 1, width - 8, -1):
             column = [session.cell(x, y) for y in range(top, bottom)]
             if not any(cell[2] in bar for cell in column):
                 continue                      # not the scrollbar's column
-            marks = [session.cell(x + 1, y) for y in range(top, bottom)]
+            # text | scrollbar | a blank column | the ruler
+            marks = [session.cell(x + 2, y) for y in range(top, bottom)]
             return ''.join(names.get(cell[1], '.') for cell in marks)
         return '.' * (bottom - top)
 
@@ -267,7 +268,7 @@ class TestOverviewRuler(unittest.TestCase):
             from tide import theme
             theme.apply('dark', 'modern')
             found = set()
-            for x in range(89, 85, -1):
+            for x in range(89, 84, -1):
                 found |= set(s.cell(x, y)[2] for y in range(s.BODY_ROW, 14))
             self.assertTrue(theme.SCROLL_THUMB in found
                             or theme.SCROLL_THUMB_HL in found,
@@ -556,7 +557,8 @@ class TestRulerRuns(unittest.TestCase):
         self.ruler(changed)
         editor = self.app.editor
         self.assertEqual(editor.ov_x, editor.rect.x2 - 1)
-        self.assertEqual(editor.sb_x, editor.ov_x - 1)
+        self.assertEqual(editor.sb_x, editor.ov_x - 2,
+                         'no gap between the scrollbar and the ruler')
         self.assertLessEqual(editor.text_rect.x2, editor.sb_x)
 
     def test_a_whole_new_file_is_one_unbroken_line(self):

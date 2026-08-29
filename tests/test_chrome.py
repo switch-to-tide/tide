@@ -452,12 +452,12 @@ class TestTheMenus(unittest.TestCase):
         self.app.handle_key(Key('up'))
         self.assertEqual(menu.index, first)
 
-    def test_the_highlight_follows_the_pointer(self):
+    def test_the_highlight_follows_a_drag(self):
         from tide.keys import Mouse
         menu = self.open_menu('View')
         rows = [i for i, item in enumerate(menu.items) if item is not None]
         target = rows[2]
-        self.app.handle_mouse(Mouse('move', menu.rect.x + 3,
+        self.app.handle_mouse(Mouse('drag', menu.rect.x + 3,
                                     menu.rect.y + 1 + target))
         self.assertEqual(menu.index, target)
 
@@ -492,21 +492,27 @@ class TestTheMenus(unittest.TestCase):
             self.app.handle_key(Key('escape'))
         self.assertEqual(len(widths), 1, 'the menus were %s wide' % sorted(widths))
 
-    def test_hovering_the_bar_switches_menus(self):
-        from tide.keys import Mouse
+    def test_one_click_moves_to_another_menu(self):
         self.open_menu('Tide')
         span = next(s for s in self.app.menu_spans if s[2] == 'View')
-        self.app.handle_mouse(Mouse('move', span[0] + 1, 0))
-        self.app.render()
+        self.press(span[0] + 1, 0)
         self.assertEqual(self.app.menu_open, 'View')
         self.assertEqual(self.app.overlay.name, 'View')
 
-    def test_hovering_help_does_not_open_it(self):
+    def test_dragging_along_the_bar_moves_between_menus(self):
+        from tide.keys import Mouse
+        self.open_menu('Tide')
+        span = next(s for s in self.app.menu_spans if s[2] == 'View')
+        self.app.handle_mouse(Mouse('drag', span[0] + 1, 0))
+        self.app.render()
+        self.assertEqual(self.app.menu_open, 'View')
+
+    def test_dragging_over_help_does_not_set_it_off(self):
         from tide.keys import Mouse
         self.open_menu('Tide')
         span = next(s for s in self.app.menu_spans if s[2] == 'Help')
-        self.app.handle_mouse(Mouse('move', span[0] + 1, 0))
-        self.assertEqual(self.app.menu_open, 'Tide', 'a button opened on hover')
+        self.app.handle_mouse(Mouse('drag', span[0] + 1, 0))
+        self.assertEqual(self.app.menu_open, 'Tide', 'a button went off mid-drag')
 
     def test_the_file_menu_goes_to_a_document(self):
         self.app.open_file(os.path.join(self.tmp, 'sub', 'deep.py'))
@@ -550,23 +556,12 @@ class TestTheMenus(unittest.TestCase):
         self.assertEqual(self.app.editor.title,
                          menu.items[before + 1][0].strip(' \u2713*'))
 
-    def test_the_pointer_is_only_tracked_while_a_menu_is_down(self):
-        import re
-        from tide.keys import Key
-
-        def state():
-            found = re.findall(r'\[\?1003([hl])', self.app.out.getvalue())
-            return found[-1] if found else 'l'
-        self.open_menu('View')
-        self.assertEqual(state(), 'h', 'the menu did not ask for the pointer')
-        self.app.handle_key(Key('escape'))
-        self.assertEqual(state(), 'l', 'escape left the pointer tracked')
+    def test_tide_never_asks_for_motion_reports(self):
+        """Any-motion reporting floods a slow link; tide does without it."""
         menu = self.open_menu('View')
-        self.press(menu.rect.x + 3, menu.rect.y + 1)          # choose an item
-        self.assertEqual(state(), 'l', 'choosing left the pointer tracked')
-        menu = self.open_menu('View')
-        self.press(2, menu.rect.y2 + 2)                       # a click outside
-        self.assertEqual(state(), 'l', 'clicking away left the pointer tracked')
+        self.press(menu.rect.x + 3, menu.rect.y + 1)
+        self.open_menu('Tide')
+        self.assertNotIn('[?1003h', self.app.out.getvalue())
 
     def test_it_skips_the_separators(self):
         menu = self.open_menu('Tide')

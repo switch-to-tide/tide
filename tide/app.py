@@ -1726,6 +1726,13 @@ class App(object):
         self.need_render = True
 
     def handle_mouse(self, ev):
+        if ev.kind == 'move':
+            # tide never asks the terminal to report the pointer moving: it
+            # is a flood of events for nothing, and a slow link drowns in the
+            # repaints. Anything that arrives anyway is only a menu's business
+            if isinstance(self.overlay, menus.Dropdown):
+                self.overlay.on_mouse(ev)
+            return
         self.need_render = True
         if self.overlay is not None:
             current = self.overlay
@@ -1912,30 +1919,16 @@ class App(object):
         if self.review.on_key(key):
             self.need_render = True
 
-    def track_pointer(self, on):
-        """Hear the mouse move, which the terminal only reports when asked.
-
-        Only while a menu is open: the rest of the time it is traffic for
-        nothing, and it stops the terminal's own selection working.
-        """
-        try:
-            self.out.write('\x1b[?1003h' if on else '\x1b[?1003l')
-            self.out.flush()
-        except Exception:
-            pass
-
     def open_menu(self, name, x=None):
         """Drop one of the menus open under its name."""
         if self.menu_open == name:
             self.menu_open = None
             self.overlay = None
-            self.track_pointer(False)
             self.need_render = True
             return
         items = self.menu_items(name)
         if items is None:
             self.menu_open = None
-            self.track_pointer(False)
             self.overlay = Help()          # Help is the shortcut list itself
             self.need_render = True
             return
@@ -1944,7 +1937,6 @@ class App(object):
         self.menu_open = name
         self.overlay = menus.Dropdown(self, name, x, self.rects['switch'].y + 1,
                                       items, width=self.menu_width())
-        self.track_pointer(True)
         self.need_render = True
 
     def open_menu_beside(self, name, delta):
@@ -2326,7 +2318,13 @@ class App(object):
             if not data:
                 self.running = False
                 return
-            for ev in self.decoder.feed(data):
+            events = list(self.decoder.feed(data))
+            for i, ev in enumerate(events):
+                if (isinstance(ev, Mouse) and ev.kind == 'move'
+                        and i + 1 < len(events)
+                        and isinstance(events[i + 1], Mouse)
+                        and events[i + 1].kind == 'move'):
+                    continue      # only where a run of moves ended matters
                 if isinstance(ev, Key):
                     self.handle_key(ev)
                 elif isinstance(ev, Mouse):
