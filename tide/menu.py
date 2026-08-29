@@ -47,6 +47,7 @@ class Dropdown(object):
         self.x = x
         self.y = y
         self.width = width            # the same for every menu on the bar
+        self.top = 0                  # first item shown, when there are many
         self.items = items            # (label, hint, action) or SEPARATOR
                                       # an item with no action is greyed out
         self.index = self._first()
@@ -66,6 +67,9 @@ class Dropdown(object):
     def close(self):
         self.app.menu_open = None
         self.app.overlay = None
+        # stop hearing the pointer move: outside a menu it is a flood of
+        # events for nothing, and the shell would be sent them too
+        self.app.track_pointer(False)
         self.app.need_render = True
 
     def choose(self, index):
@@ -82,7 +86,26 @@ class Dropdown(object):
             i = (i + delta) % len(self.items)
             if self.pickable(i):
                 self.index = i
+                self._into_view()
                 return
+
+    def _into_view(self):
+        rows = max(1, self.rect.h - 2)
+        if self.index < self.top:
+            self.top = self.index
+        elif self.index >= self.top + rows:
+            self.top = self.index - rows + 1
+
+    def scroll(self, delta):
+        rows = max(1, self.rect.h - 2)
+        self.top = max(0, min(self.top + delta, max(0, len(self.items) - rows)))
+        # keep the highlight among what is showing, so enter means what it says
+        if not self.top <= self.index < self.top + rows:
+            near = range(self.top, min(len(self.items), self.top + rows))
+            for i in (near if self.index < self.top else reversed(near)):
+                if self.pickable(i):
+                    self.index = i
+                    break
 
     # ---------------- keys ----------------
     def on_key(self, key):
@@ -110,6 +133,10 @@ class Dropdown(object):
         pass
 
     def on_mouse(self, ev):
+        if ev.kind in ('wheel_up', 'wheel_down'):
+            self.scroll(-2 if ev.kind == 'wheel_up' else 2)
+            self.app.need_render = True
+            return True
         if ev.kind == 'move':
             if ev.y == self.y - 1:
                 # along the bar with a menu down: the one under the pointer
@@ -137,18 +164,21 @@ class Dropdown(object):
         return True
 
     def y_to_index(self, y):
-        return y - self.rect.y - 1
+        return y - self.rect.y - 1 + self.top
 
     # ---------------- painting ----------------
     def render(self, screen, area):
         width = self.width or item_width(self.items)
         width = min(max(width, 18), area.w - 2)
-        height = len(self.items) + 2
+        # a long menu - every open document, say - stops at four fifths of
+        # the screen and scrolls inside that
+        room = min(area.y2 - self.y, max(4, int(area.h * 0.8)))
+        height = min(len(self.items) + 2, max(3, room))
         x = min(self.x, area.x2 - width - 1)
         y = self.y
-        if y + height > area.y2:
-            height = max(3, area.y2 - y)
         self.rect = Rect(x, y, width, height)
+        rows = height - 2
+        self.top = max(0, min(self.top, max(0, len(self.items) - rows)))
         screen.fill(x, y, width, height, bg=theme.PANEL_ALT)
         border = theme.BORDER
         screen.put(x, y, '╭' + '─' * (width - 2) + '╮',
@@ -158,10 +188,9 @@ class Dropdown(object):
         for row in range(y + 1, y + height - 1):
             screen.put(x, row, '│', fg=border, bg=theme.PANEL_ALT)
             screen.put(x + width - 1, row, '│', fg=border, bg=theme.PANEL_ALT)
-        for i, item in enumerate(self.items):
-            row = y + 1 + i
-            if row >= y + height - 1:
-                break
+        for offset, item in enumerate(self.items[self.top:self.top + rows]):
+            i = self.top + offset
+            row = y + 1 + offset
             if item is SEPARATOR:
                 screen.put(x + 1, row, '─' * (width - 2), fg=border,
                            bg=theme.PANEL_ALT, attr=DIM)
@@ -178,7 +207,18 @@ class Dropdown(object):
             if hint:
                 screen.put(x + width - 2 - len(hint), row, hint,
                            fg=theme.FG_DIM, bg=bg, max_x=x + width - 1)
+        if len(self.items) > rows:
+            self._render_bar(screen, x + width - 1, y + 1, rows)
         return None
+
+    def _render_bar(self, screen, x, y, rows):
+        """A thumb on the border, showing how much of the menu is showing."""
+        thumb = max(1, int(round(rows * rows / float(len(self.items)))))
+        span = len(self.items) - rows
+        offset = int(round((rows - thumb) * self.top / float(span))) if span else 0
+        for i in range(thumb):
+            row = y + min(rows - 1, offset + i)
+            screen.put(x, row, '┃', fg=theme.SCROLL_THUMB, bg=theme.PANEL_ALT)
 
 
 def item_width(items):

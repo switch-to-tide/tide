@@ -39,6 +39,7 @@ class Editor(object):
         self.git_marks = {}       # line number -> 'added' | 'modified' | 'deleted'
         self.git_gutter = False
         self.sb_x = None
+        self.ov_x = None
         self.sb_grab = 0
         self.find_query = ''
         self.find_matches = []
@@ -837,12 +838,17 @@ class Editor(object):
         self.git_gutter = bool(self.git_marks) or getattr(
             getattr(self.app, 'git', None), 'enabled', False)
         self.gutter = max(3, len(str(nlines))) + (3 if self.git_gutter else 2)
-        # a one column scrollbar on the right, but only when there is more
-        # document than viewport
-        show_bar = nlines > rect.h and rect.w > self.gutter + 4
-        self.sb_x = rect.x2 - 1 if show_bar else None
+        # the whole file squeezed into one column at the far right, showing
+        # where git says it has changed, and beside it a one column scrollbar
+        # - that one only when there is more document than viewport
+        self.ov_x = (rect.x2 - 1 if self.git_marks and rect.w > self.gutter + 5
+                     else None)
+        edge = 1 if self.ov_x is not None else 0
+        show_bar = nlines > rect.h and rect.w > self.gutter + 4 + edge
+        self.sb_x = rect.x2 - 1 - edge if show_bar else None
         self.text_rect = Rect(rect.x + self.gutter, rect.y,
-                              rect.w - self.gutter - (1 if show_bar else 0), rect.h)
+                              rect.w - self.gutter - edge - (1 if show_bar else 0),
+                              rect.h)
         r = self.text_rect
         if not self.wrapping():
             self.top = max(0, min(self.top, self.max_top()))
@@ -989,7 +995,7 @@ class Editor(object):
         long file shows at a glance both where its edits are and how much of
         it they cover.
         """
-        if not self.git_marks or self.sb_x is None:
+        if not self.git_marks or self.ov_x is None:
             return
         r = self.text_rect
         total = max(1, len(self.doc.lines))
@@ -999,15 +1005,19 @@ class Editor(object):
             # a run of changed lines is a bar as tall as its share of the
             # file, so ten changed lines read as ten times one changed line
             top = r.y + int(start * r.h / total)
-            bottom = r.y + int((end + 1) * r.h / total)
+            # round the end up, so neighbouring runs meet rather than leaving
+            # a gap, and a file changed to its last line is marked to the foot
+            bottom = r.y + -(-(end + 1) * r.h // total)
             for y in range(top, max(top + 1, bottom)):
                 if rank.get(kind, 0) >= rank.get(worst.get(y), 0):
                     worst[y] = kind
         for y, kind in worst.items():
             if not (0 <= y < screen.height):
                 continue
-            behind = screen.cells[y][self.sb_x][2]      # track or thumb
-            screen.put(self.sb_x, y, '─', fg=theme.LINE_COLOUR[kind], bg=behind)
+            # a thin unbroken line: next to a run above or below it there is
+            # no gap, so a long change reads as one bar, as in the gutter
+            screen.put(self.ov_x, y, '▏', fg=theme.LINE_COLOUR[kind],
+                       bg=theme.BG)
 
     def cursor_screen_pos(self):
         row, col = self.doc.cursor

@@ -207,7 +207,7 @@ class RawTerminal(object):
         return self
 
     def __exit__(self, *exc):
-        self.out.write('\x1b[?2004l\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[0m\x1b[?25h\x1b[?1049l')
+        self.out.write('\x1b[?2004l\x1b[?1006l\x1b[?1003l\x1b[?1002l\x1b[?1000l\x1b[0m\x1b[?25h\x1b[?1049l')
         self.out.flush()
         if self.saved is not None:
             termios.tcsetattr(self.fd, termios.TCSADRAIN, self.saved)

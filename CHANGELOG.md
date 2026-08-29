@@ -6,6 +6,22 @@ Versions are tagged in git as `v0.1.0` and so on, and the installer takes one:
 curl -fsSL https://raw.githubusercontent.com/switch-to-tide/tide/main/install.sh | sh -s -- 0.1.0
 ```
 
+## 0.1.25 — 2026-08-29
+
+- **Fixed the editor going sluggish after using a menu.** A menu asks the
+  terminal to report the pointer moving, so the highlight can follow it, and
+  only clicking its own name again turned that back off - every other way of
+  closing one left every mouse movement pouring into tide, and into whatever
+  the shell was running. Closing a menu now stops it however it is closed, and
+  so does leaving tide.
+- The change ruler is a continuous line in its own column, just to the right
+  of the scrollbar rather than on top of it: the file squeezed down to the
+  height of the pane, so a run of changed lines is one unbroken bar of its own
+  height and a brand new file is one line from top to bottom. Thinner than the
+  bar in the gutter, and out of the scrollbar's way.
+- A menu longer than four fifths of the screen - the File menu with a lot of
+  documents open - stops there and scrolls, with a thumb down its edge.
+
 ## 0.1.24 — 2026-08-29
 
 - **A File menu**, between Tide and View: every open document, named exactly

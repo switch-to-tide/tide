@@ -379,7 +379,7 @@ class TestNoAutoSaveFlag(IDETest):
     def test_quit_still_asks(self):
         self.s.type('# ')
         self.s.key(CTRL('q'))
-        self.assertIn('before quitting?', self.s.screen())
+        self.assertIn('Unsaved changes', self.s.screen())
 
 
 class TestFullSizeTerminal(IDETest):
@@ -772,8 +772,8 @@ class TestNavigation(IDETest):
         self.s.key(CTRL('n'))                 # an untitled buffer auto-save cannot write
         self.s.type('x')
         self.s.key(CTRL('q'))
-        self.assertIn('before quitting?', self.s.screen())
-        self.s.key('n', settle=0.5)
+        self.assertIn('Unsaved changes', self.s.screen())
+        self.s.key('q', settle=0.5)
         time.sleep(0.4)
         self.assertFalse(self.s.alive())
 

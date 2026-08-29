@@ -523,6 +523,51 @@ class TestTheMenus(unittest.TestCase):
         self.assertIsNone(items[1], 'no separator under it')
         self.assertIsNotNone(items[0][2])
 
+    def test_a_long_file_menu_stops_and_scrolls(self):
+        from tide.keys import Mouse
+        for i in range(30):
+            path = os.path.join(self.tmp, 'many%02d.py' % i)
+            with open(path, 'w') as f:
+                f.write('x = 1\n')
+            self.app.open_file(path)
+        self.app.render()
+        menu = self.open_menu('File')
+        self.assertLess(menu.rect.h, self.app.screen.height * 0.85,
+                        'the menu filled the screen')
+        self.assertLess(menu.rect.h, len(menu.items) + 2, 'nothing was cut off')
+        rows = menu.rect.h - 2
+        thumb = [y for y in range(menu.rect.y, menu.rect.y + menu.rect.h)
+                 if self.app.screen.cells[y][menu.rect.x2 - 1][0] == '\u2503']
+        self.assertTrue(thumb, 'no scrollbar on a menu that does not fit')
+        self.app.handle_mouse(Mouse('wheel_down', menu.rect.x + 3, menu.rect.y + 3))
+        self.app.render()
+        self.assertGreater(menu.top, 0, 'the wheel did not scroll it')
+        self.assertTrue(menu.top <= menu.index < menu.top + rows,
+                        'the highlight was left off screen')
+        # a click still lands on the row it is over
+        before = menu.top
+        self.app.handle_mouse(Mouse('press', menu.rect.x + 3, menu.rect.y + 2))
+        self.assertEqual(self.app.editor.title,
+                         menu.items[before + 1][0].strip(' \u2713*'))
+
+    def test_the_pointer_is_only_tracked_while_a_menu_is_down(self):
+        import re
+        from tide.keys import Key
+
+        def state():
+            found = re.findall(r'\[\?1003([hl])', self.app.out.getvalue())
+            return found[-1] if found else 'l'
+        self.open_menu('View')
+        self.assertEqual(state(), 'h', 'the menu did not ask for the pointer')
+        self.app.handle_key(Key('escape'))
+        self.assertEqual(state(), 'l', 'escape left the pointer tracked')
+        menu = self.open_menu('View')
+        self.press(menu.rect.x + 3, menu.rect.y + 1)          # choose an item
+        self.assertEqual(state(), 'l', 'choosing left the pointer tracked')
+        menu = self.open_menu('View')
+        self.press(2, menu.rect.y2 + 2)                       # a click outside
+        self.assertEqual(state(), 'l', 'clicking away left the pointer tracked')
+
     def test_it_skips_the_separators(self):
         menu = self.open_menu('Tide')
         seen = set()

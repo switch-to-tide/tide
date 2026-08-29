@@ -227,7 +227,8 @@ class TestOverviewRuler(unittest.TestCase):
             column = [session.cell(x, y) for y in range(top, bottom)]
             if not any(cell[2] in bar for cell in column):
                 continue                      # not the scrollbar's column
-            return ''.join(names.get(cell[1], '.') for cell in column)
+            marks = [session.cell(x + 1, y) for y in range(top, bottom)]
+            return ''.join(names.get(cell[1], '.') for cell in marks)
         return '.' * (bottom - top)
 
     def test_changes_show_up_at_their_position_in_the_file(self):
@@ -536,7 +537,7 @@ class TestRulerRuns(unittest.TestCase):
         self.app.render()
         names = {theme.GIT_LINE_ADDED: 'G', theme.GIT_LINE_MODIFIED: 'B',
                  theme.GIT_LINE_DELETED: 'R'}
-        return ''.join(names.get(self.app.screen.cells[y][editor.sb_x][1], '.')
+        return ''.join(names.get(self.app.screen.cells[y][editor.ov_x][1], '.')
                        for y in range(editor.text_rect.y, editor.text_rect.y2))
 
     def test_half_the_file_changing_marks_half_the_ruler(self):
@@ -548,6 +549,26 @@ class TestRulerRuns(unittest.TestCase):
                                 'of the ruler: %r' % picture)
         self.assertNotIn('.', picture[-marked:].rstrip('.'),
                          'the run is broken up: %r' % picture)
+
+    def test_the_ruler_is_beside_the_scrollbar_not_on_it(self):
+        changed = list(self.lines)
+        changed[5] = 'line 5 CHANGED'
+        self.ruler(changed)
+        editor = self.app.editor
+        self.assertEqual(editor.ov_x, editor.rect.x2 - 1)
+        self.assertEqual(editor.sb_x, editor.ov_x - 1)
+        self.assertLessEqual(editor.text_rect.x2, editor.sb_x)
+
+    def test_a_whole_new_file_is_one_unbroken_line(self):
+        import subprocess
+        path = os.path.join(self.repo, 'fresh.txt')
+        with open(path, 'w') as f:
+            f.write('\n'.join('new %d' % i for i in range(120)) + '\n')
+        subprocess.call(['git', '-C', self.repo, 'add', '-A'])
+        self.path = path
+        picture = self.ruler(['new %d' % i for i in range(120)])
+        self.assertNotIn('.', picture, 'a new file left gaps: %r' % picture)
+        self.assertEqual(set(picture), set('G'), picture)
 
     def test_one_changed_line_is_one_mark(self):
         changed = list(self.lines)
