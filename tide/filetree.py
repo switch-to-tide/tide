@@ -96,14 +96,15 @@ class FileTree(object):
         self.refresh()
         return True
 
-    def activate(self):
+    def activate(self, preview=False):
+        """Open what is selected: a click previews it, enter keeps it."""
         entry = self.current()
         if not entry:
             return
         if entry.is_dir:
             self.toggle(entry)
         else:
-            self.app.open_file(entry.path)
+            self.app.open_file(entry.path, preview=preview)
 
     def rows(self):
         """How many entries fit under the header."""
@@ -193,7 +194,7 @@ class FileTree(object):
             return True
         if 0 <= row < len(self.entries):
             self.index = row
-            self.activate()
+            self.activate(preview=True)     # a click shows it, enter keeps it
         return True
 
     def render(self, screen, rect, focused):

@@ -6,6 +6,19 @@ Versions are tagged in git as `v0.1.0` and so on, and the installer takes one:
 curl -fsSL https://raw.githubusercontent.com/switch-to-tide/tide/main/install.sh | sh -s -- 0.1.0
 ```
 
+## 0.1.34 — 2026-08-29
+
+- **Preview tabs.** Clicking a file in the explorer shows it in a tab marked
+  `(p)`, and the next click replaces that tab rather than opening another, so
+  looking through a folder leaves one tab behind instead of twenty. The tab
+  becomes a real one the moment you type in it, or when you press enter on it
+  in the explorer - which is the only way to keep a picture, since there is
+  nothing to type into. Opening a file any other way - the quick open, the
+  File menu, the command line - is never a preview.
+- **The divider between the halves of a split view can be dragged**, like the
+  explorer's edge and the terminal's bar, and where you leave it is where it
+  is next time.
+
 ## 0.1.33 — 2026-08-29
 
 - **PNG files open as pictures.** A tab of its own, fitted to the pane, read

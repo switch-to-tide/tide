@@ -462,6 +462,9 @@ HELP_TEXT = [
     ('Files', [
         ('ctrl+p', 'quick open file (fuzzy)'),
         ('ctrl+o', 'open path'),
+        ('click in the explorer', 'shows the file in a preview tab, marked (p);'),
+        ('  ', 'the next click replaces it rather than piling up'),
+        ('enter in the explorer', 'keeps that tab for good - so does typing in it'),
         ('ctrl+n / ctrl+w', 'new tab / close tab'),
         ('click x on a tab', 'close that tab (middle-click too)'),
         ('wheel over the tabs', 'scroll the strip when there are too many'),
@@ -476,6 +479,7 @@ HELP_TEXT = [
         ('click / drag', 'move cursor / select'),
         ('scrollbar (right edge)', 'drag the thumb, or click the track to jump'),
         ('drag the explorer edge', 'resize the side panel'),
+        ('drag between the halves', 'in split view, share the width out'),
         ('double / triple click', 'select word / line'),
         ('shift+click, shift+arrows', 'extend selection'),
         ('ctrl+arrows', 'move by word'),

@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from harness import CTRL, Session
+from tide import settings as settings_store
 from tide.app import App, MIN_SIDEBAR_W, MIN_TERM_H
 from tide import chrome, theme
 from tide.term import Screen
@@ -175,6 +176,43 @@ class TestDividers(PaneTest):
         before = app.tree.index
         app.handle_mouse(_press(chrome.grab_column(app.rects), 3))
         self.assertEqual(app.tree.index, before)
+
+    def test_dragging_the_middle_divider_shares_out_a_split(self):
+        self.files(3)
+        app = self.app()
+        app.open_file(os.path.join(self.tmp, 'f000.txt'))
+        app.split = True
+        app.new_big_terminal()
+        app.render()
+        divider = app.rects['divider']
+        before = app.rects['editor'].w
+        app.handle_mouse(_press(divider, app.rects['editor'].y + 1))
+        self.assertEqual(app.mouse_capture, 'msplitter')
+        app.handle_mouse(_drag(divider + 10, app.rects['editor'].y + 1))
+        app.render()
+        self.assertEqual(app.rects['divider'], divider + 10,
+                         'the divider did not follow the drag')
+        self.assertGreater(app.rects['editor'].w, before,
+                           'the left half did not grow with it')
+        app.handle_mouse(_release(divider + 10, app.rects['editor'].y + 1))
+        self.assertIsNone(app.mouse_capture)
+        self.assertAlmostEqual(settings_store.load().get('split_ratio'),
+                               round(app.split_ratio, 3),
+                               msg='the new share was not remembered')
+
+    def test_neither_half_can_be_dragged_away(self):
+        self.files(3)
+        app = self.app()
+        app.open_file(os.path.join(self.tmp, 'f000.txt'))
+        app.split = True
+        app.new_big_terminal()
+        app.render()
+        app.handle_mouse(_press(app.rects['divider'], app.rects['editor'].y + 1))
+        for x in (0, 999):
+            app.handle_mouse(_drag(x, app.rects['editor'].y + 1))
+            app.render()
+            self.assertGreater(app.rects['editor'].w, 4, 'the editor vanished')
+            self.assertGreater(app.rects['split'].w, 4, 'the terminal vanished')
 
     def test_dragging_the_terminal_divider_resizes_the_panel(self):
         self.files(3)
@@ -386,6 +424,55 @@ class TestSizesAreRemembered(PaneTest):
         app = self.app()
         self.assertGreaterEqual(app.sidebar_w, MIN_SIDEBAR_W)
         self.assertGreater(app.rects['editor'].w, 10)
+
+
+class TestPreviewTabs(PaneTest):
+    """A click in the explorer shows a file; it takes a tab only when kept."""
+
+    def open(self, app, name):
+        row = next(i for i, e in enumerate(app.tree.entries)
+                   if os.path.basename(e.path) == name)
+        side = app.rects['sidebar']
+        app.handle_mouse(_press(side.x + 3, side.y + 1 + row - app.tree.top))
+        app.render()
+
+    def test_clicking_down_the_list_leaves_one_tab(self):
+        self.files(4)
+        app = self.app()
+        for i in range(4):
+            self.open(app, 'f%03d.txt' % i)
+            self.assertEqual(len(app.editors), 1,
+                             'a click opened a tab of its own')
+        self.assertEqual(app.editor_titles(), ['f003.txt (p)'])
+
+    def test_typing_in_a_preview_keeps_it(self):
+        self.files(2)
+        app = self.app()
+        self.open(app, 'f000.txt')
+        app.editor.doc.insert('x')
+        app.render()
+        self.assertEqual(app.editor_titles(), ['f000.txt'])
+        self.open(app, 'f001.txt')
+        self.assertEqual(len(app.editors), 2, 'the edited tab was replaced')
+
+    def test_enter_in_the_explorer_keeps_it(self):
+        from tide.keys import Key
+        self.files(2)
+        app = self.app()
+        self.open(app, 'f000.txt')
+        self.assertTrue(app.editor.preview)
+        app.tree.on_key(Key('enter'))
+        app.render()
+        self.assertFalse(app.editor.preview)
+        self.open(app, 'f001.txt')
+        self.assertEqual(len(app.editors), 2)
+
+    def test_opening_a_file_any_other_way_is_not_a_preview(self):
+        self.files(2)
+        app = self.app()
+        app.open_file(os.path.join(self.tmp, 'f000.txt'))
+        app.render()
+        self.assertEqual(app.editor_titles(), ['f000.txt'])
 
 
 if __name__ == '__main__':

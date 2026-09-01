@@ -27,6 +27,7 @@ from .termpanel import TerminalPanel
 SIDEBAR_W = 26
 MIN_SIDEBAR_W = 12           # narrower than this and names are unreadable
 MIN_MAIN_W = 30              # what the editor keeps when you drag the divider
+MIN_HALF_W = 12              # and what each half of a split keeps
 MESSAGE_SECONDS = 6          # how long a status message stays on the bar
 MIN_TERM_H = 3
 DEFAULT_TERM_H = 12
@@ -81,6 +82,8 @@ class App(object):
         self._last_tree_refresh = 0.0
         self.term_h = DEFAULT_TERM_H
         self.term_h_user_set = False
+        self.split_ratio = min(0.85, max(0.15, float(
+            self.settings.get('split_ratio') or 0.5)))
         self.sidebar_w = max(MIN_SIDEBAR_W,
                              int(self.settings.get('sidebar_width') or SIDEBAR_W))
         kept = int(self.settings.get('terminal_height') or 0)
@@ -93,6 +96,7 @@ class App(object):
         self.menu_open = None        # which menu is down, if any
         self._splitter_hold = 0      # where on the divider a drag took hold
         self._main_w = 80            # width the layout last gave the panes
+        self._main_x = 0             # and where they started
         self.menu_spans = []
         self._menu_end = 0
         self._tracking = False
@@ -206,7 +210,7 @@ class App(object):
             return '%s has %d lines' % (name, lines)
         return None
 
-    def open_file(self, path, force=False):
+    def open_file(self, path, force=False, preview=False):
         path = os.path.abspath(path)
         if os.path.isdir(path):
             self.status('%s is a directory' % path)
@@ -218,16 +222,16 @@ class App(object):
         if self.settings.get('audio'):
             from . import audio                 # a set literal, nothing more
             if audio.is_audio(path):
-                return self.open_audio(path)
+                return self.open_audio(path, preview=preview)
         from . import image                     # the same: a set literal
         if image.is_image(path):
-            return self.open_image(path)
+            return self.open_image(path, preview=preview)
         if not force:
             reason = self._open_guard(path)
             if reason:
                 self.overlay = Confirm(
                     '%s. Open anyway (it may be slow)?' % reason,
-                    lambda: self.open_file(path, force=True),
+                    lambda: self.open_file(path, force=True, preview=preview),
                     on_no=lambda: self.status('Did not open %s'
                                               % os.path.basename(path)))
                 self.need_render = True
@@ -248,6 +252,8 @@ class App(object):
                 self.active = i
                 self.focus = 'editor'
                 self.main_view = 'editor'      # the file half, not the shell
+                if not preview:
+                    self.keep_tab(ed)          # enter on it keeps it for good
                 self.recheck_disk_soon()
                 self.need_render = True
                 return ed
@@ -257,7 +263,7 @@ class App(object):
             self.status('Cannot open %s: %s' % (os.path.basename(path), exc))
             return None
         ed = self.adopt(Editor(self, doc))
-        self._place_tab(ed)
+        self._place_tab(ed, preview)
         self.focus = 'editor'
         self.main_view = 'editor'
         self.need_render = True
@@ -267,10 +273,22 @@ class App(object):
             self.status('Opened %s' % self.rel(path))
         return ed
 
-    def _place_tab(self, tab):
-        """In front, over a pristine untitled tab if that is all there is."""
+    def _place_tab(self, tab, preview=False):
+        """In front: over the tab being previewed, or a pristine untitled one.
+
+        Only one tab is ever a preview, so clicking down a list of files in
+        the explorer leaves one tab behind rather than twenty.
+        """
+        tab.preview = bool(preview)
+        slot = self._preview_slot() if preview else -1
         cur = self.editor
-        if (cur and getattr(cur, 'path', None) is None and not cur.doc.dirty
+        if slot >= 0:
+            old = self.editors[slot]
+            if hasattr(old, 'close'):
+                old.close()
+            self.editors[slot] = tab
+            self.active = slot
+        elif (cur and getattr(cur, 'path', None) is None and not cur.doc.dirty
                 and cur.doc.text() == '' and len(self.editors) == 1):
             self.editors[0] = tab
             self.active = 0
@@ -278,7 +296,20 @@ class App(object):
             self.editors.append(tab)
             self.active = len(self.editors) - 1
 
-    def open_audio(self, path):
+    def _preview_slot(self):
+        """Which tab is only being previewed, if any."""
+        for i, tab in enumerate(self.editors):
+            if getattr(tab, 'preview', False):
+                return i
+        return -1
+
+    def keep_tab(self, tab):
+        """This one is not a passing look any more."""
+        if getattr(tab, 'preview', False):
+            tab.preview = False
+            self.need_render = True
+
+    def open_audio(self, path, preview=False):
         """An audio file gets a tab of its own, with a play button in it."""
         from . import audio
         real = os.path.realpath(path)
@@ -287,6 +318,8 @@ class App(object):
                     os.path.realpath(tab.path) == real:
                 self.active, self.focus = i, 'editor'
                 self.main_view = 'editor'
+                if not preview:
+                    self.keep_tab(tab)     # enter on it keeps it for good
                 self.need_render = True
                 return tab
         try:
@@ -295,14 +328,8 @@ class App(object):
             self.status('Cannot play %s: %s' % (os.path.basename(path), exc))
             return None
         self.hush_audio()                      # nothing else keeps playing
-        cur = self.editor
-        if (cur and cur.path is None and not cur.doc.dirty
-                and cur.doc.text() == '' and len(self.editors) == 1):
-            self.editors[0] = view             # replace a pristine untitled tab
-            self.active = 0
-        else:
-            self.editors.append(view)
-            self.active = len(self.editors) - 1
+        self.adopt(view)
+        self._place_tab(view, preview)
         self.focus = 'editor'
         self.main_view = 'editor'
         self.need_render = True
@@ -358,7 +385,7 @@ class App(object):
                                  len(self.editors) - 1))
         self.need_render = True
 
-    def open_image(self, path):
+    def open_image(self, path, preview=False):
         """A picture gets a tab of its own, shown rather than read."""
         from . import image
         real = os.path.realpath(path)
@@ -367,6 +394,8 @@ class App(object):
                     os.path.realpath(tab.path) == real:
                 self.active, self.focus = i, 'editor'
                 self.main_view = 'editor'
+                if not preview:
+                    self.keep_tab(tab)     # enter on it keeps it for good
                 self.need_render = True
                 return tab
         try:
@@ -375,7 +404,7 @@ class App(object):
             self.status('Cannot show %s: %s' % (os.path.basename(path), exc))
             return None
         self.adopt(view)
-        self._place_tab(view)
+        self._place_tab(view, preview)
         self.focus = 'editor'
         self.main_view = 'editor'
         self.need_render = True
@@ -798,6 +827,13 @@ class App(object):
             self.big_active = min(index, len(self.big_terms) - 1)
         self.need_render = True
 
+    def _keep_edited_tabs(self):
+        """Typing in a preview keeps it: it is not a passing look any more."""
+        for tab in self.editors:
+            if getattr(tab, 'preview', False) and getattr(tab, 'doc', None) \
+                    is not None and tab.doc.dirty:
+                tab.preview = False
+
     def _track_tabs(self):
         """Remember what was in front of us, so ctrl+t can go back to it.
 
@@ -934,11 +970,14 @@ class App(object):
         """Keep the proportions you dragged the panes to, for next time."""
         width = int(self.sidebar_w)
         height = int(self.term_h) if self.term_h_user_set else 0
+        ratio = round(float(self.split_ratio), 3)
         if (self.settings.get('sidebar_width') == width
-                and self.settings.get('terminal_height') == height):
+                and self.settings.get('terminal_height') == height
+                and self.settings.get('split_ratio') == ratio):
             return
         self.settings['sidebar_width'] = width
         self.settings['terminal_height'] = height
+        self.settings['split_ratio'] = ratio
         settings_store.save(self.settings)
 
     def repaint(self):
@@ -1005,6 +1044,7 @@ class App(object):
         main_x = sw
         main_w = w - sw
         self._main_w = main_w
+        self._main_x = main_x        # before the boxes inset the panes
         rects['switch'] = Rect(main_x, 0, main_w, 1)
         rects['tabs'] = Rect(main_x, 1, main_w, 1)
         body_h = content_h - 2
@@ -1017,7 +1057,11 @@ class App(object):
             term_h = max(0, min(term_h, body_h))
         editor_h = max(1, body_h - term_h)
         if self.split_active(main_w) and self.review is None:
-            left_w = (main_w - 1) // 2
+            # where the two halves meet: half and half until it is dragged
+            room = max(1, main_w - 1)
+            left_w = int(round(room * self.split_ratio))
+            left_w = max(MIN_HALF_W, min(left_w, max(MIN_HALF_W,
+                                                     room - MIN_HALF_W)))
             rects['editor'] = Rect(main_x, 2, left_w, editor_h)
             rects['divider'] = main_x + left_w
             rects['split'] = Rect(main_x + left_w + 1, 2,
@@ -1035,6 +1079,7 @@ class App(object):
     # ---------------- rendering ----------------
     def render(self):
         scr = self.screen
+        self._keep_edited_tabs()
         self._track_tabs()
         r = self.layout()
         scr.clear(bg=theme.BG)
@@ -1286,8 +1331,13 @@ class App(object):
         """Tab names: the file, plus folders where two of them share a name."""
         paths = [getattr(ed, 'path', None) for ed in self.editors]
         labels = tabnames.titles(paths)
-        return [tabnames.tab_label(labels[i] or ed.title)
-                for i, ed in enumerate(self.editors)]
+        out = []
+        for i, ed in enumerate(self.editors):
+            label = tabnames.tab_label(labels[i] or ed.title)
+            if getattr(ed, 'preview', False):
+                label += ' (p)'          # a preview: the next click replaces it
+            out.append(label)
+        return out
 
     def tab_git_marks(self):
         """(letter, colour) per editor tab, matching the explorer's marks."""
@@ -1808,7 +1858,7 @@ class App(object):
             target = self.mouse_capture
             if ev.kind == 'release':
                 self.mouse_capture = None
-                if target in ('splitter', 'vsplitter'):
+                if target in ('splitter', 'vsplitter', 'msplitter'):
                     self.remember_panes()
             if target == 'splitter':
                 if ev.kind == 'drag':
@@ -1816,6 +1866,13 @@ class App(object):
                     self.term_h = max(MIN_TERM_H,
                                       body_bottom - (ev.y - self._splitter_hold))
                     self.term_h_user_set = True
+                return
+            if target == 'msplitter':
+                if ev.kind == 'drag':
+                    room = max(1, self._main_w - 1)
+                    self.split_ratio = min(0.85, max(
+                        0.15, (ev.x - self._main_x - self._splitter_hold)
+                        / float(room)))
                 return
             if target == 'vsplitter':
                 if ev.kind == 'drag':
@@ -1865,6 +1922,12 @@ class App(object):
                 self.focus = 'terminal'
                 self.mouse_capture = 'terminal'
             self.terminal.on_mouse(ev)
+            return
+        if (r.get('divider') is not None and ev.x == r['divider']
+                and r['editor'].y <= ev.y < r['editor'].y2):
+            if ev.kind == 'press':       # between the halves of a split view
+                self.mouse_capture = 'msplitter'
+                self._splitter_hold = ev.x - r['divider']
             return
         if (r['sidebar'] and ev.x == chrome.grab_column(r)
                 and ev.y < r['status'].y):

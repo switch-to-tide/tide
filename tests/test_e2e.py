@@ -713,7 +713,8 @@ class TestLargeFiles(IDETest):
         pos = self.s.find('huge.txt')
         self.s.click(pos[0] + 1, pos[1])
         self.s.send_raw('y')
-        self.assertTrue(self.s.wait_for('huge.txt  x'))
+        # opened from the explorer, so it is a preview: 'huge.txt (p)'
+        self.assertTrue(self.s.wait_for('huge.txt (p)'))
         self.assertIn('1 line 0', self.s.screen())
 
     def test_a_binary_file_asks_and_opens_read_only(self):

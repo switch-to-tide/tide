@@ -20,6 +20,7 @@ DEFAULTS = {
     'audio': False,
     'audio_sink_port': 0,
     'sidebar_width': 26,
+    'split_ratio': 0.5,
     'terminal_height': 0,
     'review_open_modified': True,
     'review_open_added': False,
@@ -95,6 +96,7 @@ def choices(key, values=None):
 LIMITS = {
     'audio_sink_port': (0, 65535),
     'sidebar_width': (8, 400),
+    'split_ratio': (0.15, 0.85),
     'terminal_height': (0, 400),
     'autosave_delay': (0.1, 30.0),
     'max_lines': (100, 10000000),
