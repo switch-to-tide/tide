@@ -36,7 +36,8 @@ class VT(object):
         self.cursor_visible = True
         self.autowrap = True
         self.wrap_pending = False
-        self.mouse_mode = 0        # 0 off, 1000 click, 1002 drag, 1003 any
+        self.mouse_mode = 0
+        self.mouse_modes = set()        # 0 off, 1000 click, 1002 drag, 1003 any
         self.mouse_sgr = False
         self.bracketed_paste = False
         self.app_cursor_keys = False
@@ -376,7 +377,14 @@ class VT(object):
             elif n in (1049, 1047, 47):
                 self._set_alt(on)
             elif n in (1000, 1002, 1003):
-                self.mouse_mode = n if on else 0
+                # these are three ways of asking for the same thing, and a
+                # program turning one off still wants the others: keep them
+                # apart and report the most detailed one still asked for
+                if on:
+                    self.mouse_modes.add(n)
+                else:
+                    self.mouse_modes.discard(n)
+                self.mouse_mode = max(self.mouse_modes) if self.mouse_modes else 0
             elif n == 1006:
                 self.mouse_sgr = on
             elif n == 2004:

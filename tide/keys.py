@@ -214,6 +214,10 @@ class Decoder(object):
                 if name:
                     return Key(name, mods=mods), m.end()
                 return None, m.end()
+            if final == 'R' and len(nums) > 1:
+                # a cursor position report, not f3: something in a pane asked
+                # the terminal where the cursor was and this is the answer
+                return None, m.end()
             name = _SPECIAL.get(final)
             if name == 'backtab':
                 return Key('tab', mods=SHIFT), m.end()

@@ -6,6 +6,16 @@ Versions are tagged in git as `v0.1.0` and so on, and the installer takes one:
 curl -fsSL https://raw.githubusercontent.com/switch-to-tide/tide/main/install.sh | sh -s -- 0.1.0
 ```
 
+## 0.1.39 — 2026-08-29
+
+- A cursor position report from the terminal was read as f3. Anything running
+  in a pane that asks where the cursor is gets its answer back through tide,
+  and tide typed it at whatever had the keyboard.
+- A program running in a pane can turn off one kind of mouse reporting and
+  keep the others, as the protocol intends. The emulator treated the three as
+  one switch, so a program that stopped tracking motion lost its clicks too -
+  the same trap tide had on the other side of the glass a few versions ago.
+
 ## 0.1.38 — 2026-08-29
 
 - **An accent no longer takes a column of its own.** A combining mark below
