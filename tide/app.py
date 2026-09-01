@@ -219,6 +219,9 @@ class App(object):
             from . import audio                 # a set literal, nothing more
             if audio.is_audio(path):
                 return self.open_audio(path)
+        from . import image                     # the same: a set literal
+        if image.is_image(path):
+            return self.open_image(path)
         if not force:
             reason = self._open_guard(path)
             if reason:
@@ -254,15 +257,7 @@ class App(object):
             self.status('Cannot open %s: %s' % (os.path.basename(path), exc))
             return None
         ed = self.adopt(Editor(self, doc))
-        # replace a pristine untitled tab
-        cur = self.editor
-        if (cur and cur.path is None and not cur.doc.dirty
-                and cur.doc.text() == '' and len(self.editors) == 1):
-            self.editors[0] = ed
-            self.active = 0
-        else:
-            self.editors.append(ed)
-            self.active = len(self.editors) - 1
+        self._place_tab(ed)
         self.focus = 'editor'
         self.main_view = 'editor'
         self.need_render = True
@@ -271,6 +266,17 @@ class App(object):
         else:
             self.status('Opened %s' % self.rel(path))
         return ed
+
+    def _place_tab(self, tab):
+        """In front, over a pristine untitled tab if that is all there is."""
+        cur = self.editor
+        if (cur and getattr(cur, 'path', None) is None and not cur.doc.dirty
+                and cur.doc.text() == '' and len(self.editors) == 1):
+            self.editors[0] = tab
+            self.active = 0
+        else:
+            self.editors.append(tab)
+            self.active = len(self.editors) - 1
 
     def open_audio(self, path):
         """An audio file gets a tab of its own, with a play button in it."""
@@ -352,12 +358,36 @@ class App(object):
                                  len(self.editors) - 1))
         self.need_render = True
 
+    def open_image(self, path):
+        """A picture gets a tab of its own, shown rather than read."""
+        from . import image
+        real = os.path.realpath(path)
+        for i, tab in enumerate(self.editors):
+            if getattr(tab, 'is_image', False) and \
+                    os.path.realpath(tab.path) == real:
+                self.active, self.focus = i, 'editor'
+                self.main_view = 'editor'
+                self.need_render = True
+                return tab
+        try:
+            view = image.open_view(self, path)
+        except Exception as exc:               # never let this break opening
+            self.status('Cannot show %s: %s' % (os.path.basename(path), exc))
+            return None
+        self.adopt(view)
+        self._place_tab(view)
+        self.focus = 'editor'
+        self.main_view = 'editor'
+        self.need_render = True
+        self.status('Opened %s' % os.path.basename(path))
+        return view
+
     def save(self, ed=None, path=None, force=False):
         ed = ed or self.editor
         if ed is None:
             return False
-        if getattr(ed, 'is_audio', False):
-            return False               # a sound file has nothing to save
+        if getattr(ed, 'is_audio', False) or getattr(ed, 'is_image', False):
+            return False               # neither a sound nor a picture is text
         if ed.doc.disk_missing and path is None:
             self.status('%s was deleted; it will not be written back'
                         % self.rel(ed.doc.path))
@@ -449,8 +479,8 @@ class App(object):
         self._refresh_tree_if_due(now)
 
     def _check_one_file(self, index, ed):
-        if getattr(ed, 'is_audio', False):
-            return ed.check_disk()        # a sound tab watches its own file
+        if getattr(ed, 'is_audio', False) or getattr(ed, 'is_image', False):
+            return ed.check_disk()        # these tabs watch their own file
         doc = ed.doc
         if not doc.path:
             return
@@ -817,7 +847,8 @@ class App(object):
     def text_editor(self):
         """The active tab if it is a real editor, else None."""
         ed = self.editor
-        if ed is None or ed.is_diff or getattr(ed, 'is_audio', False):
+        if ed is None or ed.is_diff or getattr(ed, 'is_audio', False) \
+                or getattr(ed, 'is_image', False):
             return None
         return ed
 
@@ -1412,7 +1443,8 @@ class App(object):
             left = self.message
         elif self.main_is_terminal():
             left = self.big_term().tab_title()
-        elif ed is not None and getattr(ed, 'is_audio', False):
+        elif ed is not None and (getattr(ed, 'is_audio', False)
+                                 or getattr(ed, 'is_image', False)):
             left = ed.title
         elif ed is not None and ed.is_diff:
             left = ed.title
@@ -1421,7 +1453,9 @@ class App(object):
         scr.put(x0, rect.y, left, fg=theme.STATUS_FG, bg=theme.STATUS_BG,
                 max_x=rect.x2 - 40)
         right = ''
-        if ed is not None and getattr(ed, 'is_audio', False):
+        if ed is not None and getattr(ed, 'is_image', False):
+            right = 'read-only'
+        elif ed is not None and getattr(ed, 'is_audio', False):
             player = ed.player
             state = 'playing' if player.playing else (
                 'paused' if player.paused else 'stopped')

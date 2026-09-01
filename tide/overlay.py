@@ -538,6 +538,7 @@ HELP_TEXT = [
         ('(automatic)', 'edits are saved 0.8s after you stop typing'),
         ('(automatic)', 'open files reload when something else changes them'),
         ('big or binary files', 'the IDE asks before opening them'),
+        ('png files', 'open as a picture: + - zoom, f fit, arrows pan'),
     ]),
     ('Other', [
         ('f9, alt+,', 'settings (appearance, theme, auto-save, limits)'),

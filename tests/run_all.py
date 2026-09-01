@@ -31,6 +31,7 @@ if __name__ == '__main__':
         loader.discover(HERE, pattern='test_update.py'),
         loader.discover(HERE, pattern='test_sessions.py'),
         loader.discover(HERE, pattern='test_wrap.py'),
+        loader.discover(HERE, pattern='test_image.py'),
         loader.discover(HERE, pattern='test_settings.py'),
         loader.discover(HERE, pattern='test_e2e.py'),
         loader.discover(HERE, pattern='test_watch.py'),

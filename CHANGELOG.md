@@ -6,6 +6,21 @@ Versions are tagged in git as `v0.1.0` and so on, and the installer takes one:
 curl -fsSL https://raw.githubusercontent.com/switch-to-tide/tide/main/install.sh | sh -s -- 0.1.0
 ```
 
+## 0.1.33 — 2026-08-29
+
+- **PNG files open as pictures.** A tab of its own, fitted to the pane, read
+  only: `+` and `-` zoom, `f` fits it again, the arrows pan around it when it
+  is bigger than the pane, and the wheel zooms. It says what it is along the
+  bottom - the size and how it was stored - and a file deleted underneath you
+  keeps its picture on screen with a red `!` on the tab, as a sound file does.
+- It works the same everywhere, which was the point: every cell is two pixels
+  drawn as an upper half block in the colour above and behind, so a picture is
+  ordinary coloured text. Nothing is asked of the terminal, so it looks the
+  same over ssh, under tmux, in a split pane, at any size. The decoder is
+  `zlib` and `struct` and nothing else - grey, palette, colour, 8 and 16 bit,
+  transparency laid over a checkerboard. Interlaced files say so rather than
+  guessing, and a damaged one shows what is wrong with it instead of failing.
+
 ## 0.1.32 — 2026-08-29
 
 - The highlight keeps up with the pointer: a menu catches up every 30
