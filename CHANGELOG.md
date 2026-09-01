@@ -6,6 +6,20 @@ Versions are tagged in git as `v0.1.0` and so on, and the installer takes one:
 curl -fsSL https://raw.githubusercontent.com/switch-to-tide/tide/main/install.sh | sh -s -- 0.1.0
 ```
 
+## 0.1.37 — 2026-08-29
+
+- A picture that moves replaces the one that was there instead of leaving it
+  behind: every placement carries an id of its own now. Without it, zooming
+  three times left three pictures on screen at three sizes.
+- Image ids are drawn at random from the range terminals reserve for them,
+  rather than counting up from a number another program may already be using.
+- Replies from the terminal - a graphics answer, a colour report - are
+  swallowed by the input decoder rather than arriving as a burst of
+  keystrokes. Nothing should send one, since every command asks for silence,
+  but a terminal that answers anyway can no longer type into your file.
+- WezTerm is sent iTerm2's escape rather than the kitty one: it answers the
+  kitty question but erases images when text is written near them.
+
 ## 0.1.36 — 2026-08-29
 
 - **Pictures in real pixels, where the terminal can draw them.** Half blocks

@@ -11,11 +11,26 @@ APC string, which every conformant terminal discards in silence.
 """
 
 import os
+import random
 import select
 import time
 
 CHUNK = 4096                       # the protocol's limit, in base64 characters
-FIRST_ID = 1729                    # ours, and unlikely to be anyone else's
+FIRST_ID = 1729                    # only for the question we ask at startup
+
+
+def _fresh_id():
+    """An id no other program on this terminal is likely to be using.
+
+    Ids are shared across everything drawing on the terminal, so they are
+    drawn at random from the range with bits set in both halves - the same
+    rule kitty's own tool uses, which keeps them clear of the low ids that
+    hand-written scripts pick.
+    """
+    while True:
+        value = random.getrandbits(32)
+        if value & 0xFF000000 and value & 0x00FFFF00:
+            return value
 
 
 def _wrap(sequence):
@@ -102,15 +117,13 @@ class ITerm2(object):
 
     def __init__(self, out):
         self.out = out
-        self.next_id = FIRST_ID + 1
         self.showing = set()
         self.files = {}
 
     def hold(self, data):
         if len(data) > self.LIMIT:
             return None
-        image_id = self.next_id
-        self.next_id += 1
+        image_id = _fresh_id()
         self.files[image_id] = data
         return image_id
 
@@ -149,7 +162,7 @@ def for_terminal(out, in_fd, settings=None):
     if known_terminal():
         return Kitty(out), b''             # it says what it is; no need to ask
     ok, leftover = query(out, in_fd)
-    if ok:
+    if ok and os.environ.get('TERM_PROGRAM') != 'WezTerm':
         return Kitty(out), leftover        # the better of the two: cheaper
     if os.environ.get('TERM_PROGRAM') in ('iTerm.app', 'WezTerm', 'vscode'):
         return ITerm2(out), leftover
@@ -169,7 +182,6 @@ class Kitty(object):
 
     def __init__(self, out):
         self.out = out
-        self.next_id = FIRST_ID + 1
         self.showing = set()          # ids with a placement on screen
 
     def _send(self, control, payload=''):
@@ -178,8 +190,7 @@ class Kitty(object):
     def hold(self, data):
         """Give the terminal a PNG to keep. Returns its id."""
         import base64
-        image_id = self.next_id
-        self.next_id += 1
+        image_id = _fresh_id()
         encoded = base64.b64encode(data).decode('ascii')
         pieces = [encoded[i:i + CHUNK] for i in range(0, len(encoded), CHUNK)]
         if not pieces:
@@ -192,18 +203,24 @@ class Kitty(object):
         return image_id
 
     def place(self, image_id, x, y, cols, rows):
-        """Draw it in that rectangle of cells, without moving the cursor."""
+        """Draw it in that rectangle of cells, without moving the cursor.
+
+        The placement carries an id of its own, so drawing it somewhere else
+        replaces the one that was there rather than leaving both: no deleting
+        first, and so nothing to flicker between the two.
+        """
         if image_id is None or cols < 1 or rows < 1:
             return
         self.out.write('\x1b[%d;%dH' % (y + 1, x + 1))
-        self._send('a=p,i=%d,c=%d,r=%d,C=1,q=2' % (image_id, cols, rows))
+        self._send('a=p,i=%d,p=%d,c=%d,r=%d,C=1,q=2'
+                   % (image_id, image_id & 0xFFFFFF, cols, rows))
         self.showing.add(image_id)
 
     def unplace(self, image_id):
         """Take it off the screen, keeping the pixels for next time."""
         if image_id is None:
             return
-        self._send('a=d,d=i,i=%d,q=2' % image_id)
+        self._send('a=d,d=i,i=%d,p=%d,q=2' % (image_id, image_id & 0xFFFFFF))
         self.showing.discard(image_id)
 
     def forget(self, image_id):

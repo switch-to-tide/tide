@@ -161,6 +161,17 @@ class Decoder(object):
         if len(b) == 1:
             return Key('escape'), 1
         n = b[1]
+        if n in '_P^X]':
+            # a string the terminal is telling us something in: a graphics
+            # reply, a device answer. Swallow it whole rather than letting it
+            # arrive as a burst of keystrokes
+            end = b.find('\x1b\\', 2)
+            bell = b.find('\x07', 2) if n == ']' else -1
+            if end >= 0 and (bell < 0 or end < bell):
+                return None, end + 2
+            if bell >= 0:
+                return None, bell + 1
+            return (Key('escape'), 1) if len(b) > 4096 else (None, 0)
         if n == '[':
             if b.startswith(_PASTE_START):
                 self.in_paste = True
