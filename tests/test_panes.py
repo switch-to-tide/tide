@@ -455,6 +455,20 @@ class TestPreviewTabs(PaneTest):
         self.open(app, 'f001.txt')
         self.assertEqual(len(app.editors), 2, 'the edited tab was replaced')
 
+    def test_a_click_leaves_the_keyboard_in_the_explorer(self):
+        from tide.keys import Key
+        self.files(2)
+        app = self.app()
+        self.open(app, 'f000.txt')
+        self.assertEqual(app.focus, 'tree',
+                         'the click moved the keyboard into the editor')
+        before = app.editor.doc.text()
+        app.handle_key(Key('enter'))
+        app.render()
+        self.assertEqual(app.editor.doc.text(), before,
+                         'enter typed a newline instead of keeping the tab')
+        self.assertFalse(app.editor.preview)
+
     def test_enter_in_the_explorer_keeps_it(self):
         from tide.keys import Key
         self.files(2)

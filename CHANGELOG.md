@@ -6,6 +6,12 @@ Versions are tagged in git as `v0.1.0` and so on, and the installer takes one:
 curl -fsSL https://raw.githubusercontent.com/switch-to-tide/tide/main/install.sh | sh -s -- 0.1.0
 ```
 
+## 0.1.35 — 2026-08-29
+
+- Clicking a file in the explorer leaves the keyboard in the explorer, so
+  enter keeps the tab rather than typing a newline into the file it just
+  showed you. Enter moves you into the editor, as it always did.
+
 ## 0.1.34 — 2026-08-29
 
 - **Preview tabs.** Clicking a file in the explorer shows it in a tab marked

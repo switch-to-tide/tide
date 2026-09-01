@@ -105,6 +105,10 @@ class FileTree(object):
             self.toggle(entry)
         else:
             self.app.open_file(entry.path, preview=preview)
+            if preview:
+                # a click shows the file but the keyboard stays here, so
+                # enter keeps the tab rather than typing into it
+                self.app.focus = 'tree'
 
     def rows(self):
         """How many entries fit under the header."""
