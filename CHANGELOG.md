@@ -6,6 +6,25 @@ Versions are tagged in git as `v0.1.0` and so on, and the installer takes one:
 curl -fsSL https://raw.githubusercontent.com/switch-to-tide/tide/main/install.sh | sh -s -- 0.1.0
 ```
 
+## 0.1.36 — 2026-08-29
+
+- **Pictures in real pixels, where the terminal can draw them.** Half blocks
+  give two pixels a cell, which is enough to see what a picture is and no use
+  for reading anything in it. tide now asks the terminal, once, whether it can
+  draw images itself - the kitty graphics protocol, or iTerm2's own - and if
+  it can, the picture is drawn at the resolution of the window rather than of
+  the character grid. On a pane sixty cells across that is the difference
+  between 120 pixels and about four thousand.
+- It costs nothing to keep on screen: the file goes over once and is placed by
+  its number afterwards, and a frame that changes nothing sends no bytes at
+  all. It is drawn again only when it moves - a zoom, a resize, a full repaint
+  - and taken down when another tab, a menu or the end of the session covers
+  it.
+- Terminals that cannot do either keep the half blocks exactly as before, and
+  **Pictures** in the settings forces them everywhere. The question is asked
+  before the session starts, so no answer lands in your typing, and a terminal
+  that says nothing costs a quarter of a second at startup.
+
 ## 0.1.35 — 2026-08-29
 
 - Clicking a file in the explorer leaves the keyboard in the explorer, so

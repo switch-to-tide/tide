@@ -238,5 +238,97 @@ class TestTheTab(unittest.TestCase):
         self.assertIn('header', painted)
 
 
+class TestRealPixels(unittest.TestCase):
+    """Where the terminal can draw the picture itself, tide lets it."""
+
+    def setUp(self):
+        self.cfg = tempfile.mkdtemp()
+        os.environ['TIDE_CONFIG_HOME'] = self.cfg
+        self.tmp = tempfile.mkdtemp()
+        self.path = os.path.join(self.tmp, 'shot.png')
+        with open(self.path, 'wb') as f:
+            f.write(build(64, 32, 8, 2, quadrants(64, 32)))
+
+    def tearDown(self):
+        os.environ.pop('TIDE_CONFIG_HOME', None)
+        shutil.rmtree(self.cfg, ignore_errors=True)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def app(self):
+        from tide.app import App
+        from tide.image.protocol import Kitty
+        from tide.term import Screen
+        app = App(root=self.tmp, paths=[], out=io.StringIO())
+        app.screen = Screen(80, 24)
+        app.show_term = False
+        app.show_tree = False
+        app.pictures = Kitty(app.out)        # as if the terminal had said yes
+        return app
+
+    @staticmethod
+    def commands(app):
+        """The graphics commands in what tide has written so far."""
+        text = app.out.getvalue()
+        return [piece.split('\x1b\\')[0].split(';')[0]
+                for piece in text.split('\x1b_G')[1:]]
+
+    def test_the_file_goes_over_once_and_is_placed_after(self):
+        app = self.app()
+        tab = app.open_file(self.path)
+        app.render()
+        sent = self.commands(app)
+        self.assertTrue(any('a=t' in c for c in sent), 'the file was not sent')
+        self.assertTrue(any('a=p' in c for c in sent), 'it was not placed')
+        self.assertIn('f=100', sent[0], 'it was not sent as a PNG')
+        app.out.truncate(0)
+        app.out.seek(0)
+        app.need_render = True
+        app.render()
+        self.assertEqual(self.commands(app), [],
+                         'a frame that changed nothing drew it again')
+        # but a picture that has moved, or been painted over, is placed again
+        from tide.keys import Key
+        app.editor.on_key(Key('char', char='+'))
+        app.need_render = True
+        app.render()
+        again = self.commands(app)
+        self.assertTrue(all('a=t' not in c for c in again),
+                        'the file was sent a second time')
+        self.assertTrue(any('a=p,i=%d' % tab.held in c for c in again))
+
+    def test_it_comes_off_the_screen_when_something_else_is_in_front(self):
+        app = self.app()
+        tab = app.open_file(self.path)
+        app.render()
+        app.new_file()                       # another tab in front of it
+        app.out.truncate(0)
+        app.out.seek(0)
+        app.need_render = True
+        app.render()
+        self.assertTrue(any('a=d' in c for c in self.commands(app)),
+                        'the picture was left on screen')
+        self.assertNotIn(tab.held, app.pictures.showing)
+
+    def test_a_menu_over_it_hides_it_rather_than_going_under_it(self):
+        app = self.app()
+        app.open_file(self.path)
+        app.render()
+        app.open_menu('View')
+        app.out.truncate(0)
+        app.out.seek(0)
+        app.need_render = True
+        app.render()
+        placed = [c for c in self.commands(app) if 'a=p' in c]
+        self.assertFalse(placed, 'the picture stayed over the menu')
+
+    def test_without_a_drawing_terminal_it_is_blocks_as_before(self):
+        app = self.app()
+        app.pictures = None
+        tab = app.open_file(self.path)
+        app.render()
+        self.assertNotIn('\x1b_G', app.out.getvalue())
+        self.assertIsNotNone(tab._grid, 'nothing was drawn in cells either')
+
+
 if __name__ == '__main__':
     unittest.main()

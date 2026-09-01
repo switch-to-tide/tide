@@ -91,11 +91,42 @@ class ImageView(object):
         self._checked = 0.0
         self._stamp = self._disk_stamp()
         self._grid = None             # the last cell grid, and what made it
+        self.held = None              # the picture, as the terminal keeps it
+        self._held_from = None        # which bytes it was given
         self.load()
 
     # ---------------- the file underneath ----------------
+    def pictures(self):
+        """The terminal's own image drawing, if it has any and it is wanted."""
+        return getattr(self.app, 'pictures', None)
+
+    def hand_over(self):
+        """Give the terminal the file itself, once, and keep its id."""
+        drawer = self.pictures()
+        if drawer is None:
+            return None
+        if self.held is not None and self._held_from == self._stamp:
+            return self.held
+        self.drop()
+        try:
+            with open(self.path, 'rb') as f:
+                data = f.read()
+        except (IOError, OSError):
+            return None
+        self.held = drawer.hold(data)
+        self._held_from = self._stamp
+        return self.held
+
+    def drop(self):
+        drawer = self.pictures()
+        if drawer is not None and self.held is not None:
+            drawer.forget(self.held)
+        self.held = None
+        self._held_from = None
+
     def load(self):
         started = time.time()
+        self.drop()
         try:
             self.image = read(self.path)
             self.trouble = ''
@@ -146,6 +177,7 @@ class ImageView(object):
         return False
 
     def close(self):
+        self.drop()
         self.image = None
         self._grid = None
 
@@ -256,6 +288,9 @@ class ImageView(object):
             self._say(screen, area, self.trouble or 'nothing to show')
             self._footer(screen, rect)
             return None
+        if self.pictures() is not None and self._as_pixels(area):
+            self._footer(screen, rect)
+            return None
         key = (area.w, area.h, self.zoom, self.pan)
         if self._grid is None or self._grid[0] != key:
             self._grid = (key, self._cells(area.w, area.h))
@@ -271,6 +306,24 @@ class ImageView(object):
                                 (BLOCK, _packed(upper), _packed(lower), 0))
         self._footer(screen, rect)
         return None
+
+    def _as_pixels(self, area):
+        """Ask the terminal to draw the picture itself. True if it will.
+
+        The cells underneath are left as background, so when the picture is
+        taken down - another tab, a menu, the end of the session - what is
+        left behind is an empty pane rather than the last thing drawn there.
+        """
+        image_id = self.hand_over()
+        if image_id is None:
+            return False
+        scale = self.zoom if self.zoom is not None else self._fit_scale()
+        cols = max(1, min(area.w, int(round(self.image.width * scale))))
+        rows = max(1, min(area.h, int(round(self.image.height * scale / 2.0))))
+        x = area.x + max(0, (area.w - cols) // 2)
+        y = area.y + max(0, (area.h - rows) // 2)
+        self.app.show_picture(image_id, x, y, cols, rows)
+        return True
 
     def _say(self, screen, area, text):
         y = area.y + area.h // 2

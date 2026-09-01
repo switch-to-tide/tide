@@ -100,6 +100,9 @@ class App(object):
         self.menu_spans = []
         self._menu_end = 0
         self._tracking = False
+        self.pictures = None         # the terminal's own image drawing, if any
+        self._picture_frame = {}
+        self._placed = {}            # where each picture is, as last drawn
         self._hover_at = None    # where the pointer was last reported
         self._hover_seen = 0.0
         self._seen_tab = None        # the tab in front of us, and the one
@@ -1129,8 +1132,53 @@ class App(object):
             c = self.overlay.render(scr, r['overlay_area'])
             if c:
                 cursor = c
+        self.finish_frame(scr, cursor)
+
+    def finish_frame(self, scr, cursor):
+        """Put the frame on screen, then whatever is drawn in pixels on top.
+
+        The cells go first so the picture is never painted over, and anything
+        left over from the last frame is taken down in the same breath.
+        """
+        pictures = self.pictures
+        wanted = self._picture_frame
+        # a picture only has to be placed again if it has moved, if the frame
+        # painted over where it is, or if the whole screen is being redrawn
+        redraw = {}
+        if pictures is not None:
+            for image_id, box in wanted.items():
+                if (self._placed.get(image_id) != box or scr.prev is None
+                        or self._painted_over(scr, box)):
+                    redraw[image_id] = box
         scr.flush(self.out, cursor)
+        if pictures is not None:
+            for image_id in list(pictures.showing):
+                if image_id not in wanted:
+                    pictures.unplace(image_id)
+                    self._placed.pop(image_id, None)
+            for image_id, box in redraw.items():
+                pictures.place(image_id, *box)
+                self._placed[image_id] = box
+            if redraw and cursor is not None:
+                self.out.write('\x1b[%d;%dH' % (cursor[1] + 1, cursor[0] + 1))
+            self.out.flush()
+        self._picture_frame = {}
         self.need_render = False
+
+    @staticmethod
+    def _painted_over(scr, box):
+        """Whether this frame is writing anything where a picture is."""
+        x, y, cols, rows = box
+        for row in range(y, min(y + rows, scr.height)):
+            line, before = scr.cells[row], scr.prev[row]
+            if line[x:x + cols] != before[x:x + cols]:
+                return True
+        return False
+
+    def show_picture(self, image_id, x, y, cols, rows):
+        """An image tab asking for its picture to be drawn after the frame."""
+        if self.pictures is not None and self.overlay is None:
+            self._picture_frame[image_id] = (x, y, cols, rows)
 
     def render_review(self, scr, r):
         """The review's own screen: changed files, one long diff, the shell."""
@@ -1152,8 +1200,7 @@ class App(object):
             c = self.overlay.render(scr, r['overlay_area'])
             if c:
                 cursor = c
-        scr.flush(self.out, cursor)
-        self.need_render = False
+        self.finish_frame(scr, cursor)
 
     def render_review_bar(self, scr, rect):
         """Where the view switch usually is: what this is, and the way out."""
@@ -2406,6 +2453,29 @@ class App(object):
         except Exception:
             pass                        # a diagnostic is never worth a crash
 
+    def ask_about_pictures(self):
+        """Can this terminal draw real pixels? Asked once, before the loop.
+
+        The reply would land in the keyboard's input if this were done later,
+        so it happens here, and anything typed meanwhile is fed back in.
+        """
+        try:
+            if not self.out.isatty():
+                return
+        except Exception:
+            return
+        from .image import protocol
+        try:
+            drawer, leftover = protocol.for_terminal(self.out, self.in_fd,
+                                                     self.settings)
+        except Exception:
+            return
+        self.pictures = drawer
+        if leftover:
+            for ev in self.decoder.feed(leftover):
+                if isinstance(ev, Key):
+                    self.handle_key(ev)   # typed while we waited: not lost
+
     def run(self):
         self.stuck_report()
         try:
@@ -2427,6 +2497,7 @@ class App(object):
                     self.terminal.start(
                         self.rects['terminal'].w if self.rects['terminal'] else 80,
                         max(2, (self.rects['terminal'].h - 1) if self.rects['terminal'] else 10))
+                self.ask_about_pictures()
                 self.render()
                 while self.running:
                     self.tick()
@@ -2440,6 +2511,12 @@ class App(object):
             for tab in self.editors:
                 if hasattr(tab, 'close'):
                     tab.close()          # no sound outlives the editor
+            if self.pictures is not None:
+                try:
+                    self.pictures.clear()
+                    self.out.flush()
+                except Exception:
+                    pass
             if isinstance(self.out, Out):
                 self.out.restore()
             if self.session:

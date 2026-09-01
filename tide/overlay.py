@@ -543,6 +543,7 @@ HELP_TEXT = [
         ('(automatic)', 'open files reload when something else changes them'),
         ('big or binary files', 'the IDE asks before opening them'),
         ('png files', 'open as a picture: + - zoom, f fit, arrows pan'),
+        ('  ', 'drawn in real pixels where the terminal can, else in blocks'),
     ]),
     ('Other', [
         ('f9, alt+,', 'settings (appearance, theme, auto-save, limits)'),
