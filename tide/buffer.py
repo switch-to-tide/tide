@@ -21,6 +21,26 @@ os.umask(_UMASK)
 NEW_FILE_MODE = 0o666 & ~_UMASK
 
 
+def _sync_folder(path):
+    """Put the rename on disk, not just the bytes.
+
+    fsync on the file promises its contents survive a power cut; the name it
+    was given lives in the folder, and that needs its own sync. Without this
+    a crash can leave the new bytes with the old name pointing nowhere.
+    """
+    folder = os.path.dirname(os.path.abspath(path)) or '.'
+    try:
+        fd = os.open(folder, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass                              # some filesystems refuse; nothing lost
+    finally:
+        os.close(fd)
+
+
 class StaleFileError(IOError):
     """The file changed on disk after we read it; saving would lose that work."""
 
@@ -282,6 +302,7 @@ class Document(object):
                 raise StaleFileError('%s changed on disk while it was being saved'
                                      % os.path.basename(path))
             os.replace(tmp, target)       # atomic: readers see old or new
+            _sync_folder(target)          # and the rename itself is on disk
         except Exception:
             if os.path.exists(tmp):
                 try:
@@ -311,7 +332,10 @@ class Document(object):
                 pass
             return
         try:
-            os.chmod(tmp, stat.S_IMODE(st.st_mode))
+            # everything the original had, less setuid and setgid: those
+            # belong to the file that was there, not to a copy of its bytes
+            mode = stat.S_IMODE(st.st_mode) & ~(stat.S_ISUID | stat.S_ISGID)
+            os.chmod(tmp, mode)
         except OSError:
             pass
         if hasattr(os, 'chown'):

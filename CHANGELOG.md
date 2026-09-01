@@ -6,6 +6,21 @@ Versions are tagged in git as `v0.1.0` and so on, and the installer takes one:
 curl -fsSL https://raw.githubusercontent.com/switch-to-tide/tide/main/install.sh | sh -s -- 0.1.0
 ```
 
+## 0.1.38 — 2026-08-29
+
+- **An accent no longer takes a column of its own.** A combining mark below
+  U+1100 was measured as one column wide, so a decomposed name - which is how
+  macOS stores them, so any file with an accent in it - pushed everything
+  after it a column to the right. The joiner inside an emoji had the same
+  fault.
+- **A saved file's name is now on disk, not only its bytes.** The write was
+  synced and the rename was atomic, but the folder holding the new name was
+  never synced, so a power cut in the wrong instant could leave the bytes
+  without the name. The folder is synced after the rename.
+- Saving over a setuid or setgid file no longer copies those bits onto the
+  new one: they belonged to the file that was there, not to a copy of its
+  contents.
+
 ## 0.1.37 — 2026-08-29
 
 - A picture that moves replaces the one that was there instead of leaving it

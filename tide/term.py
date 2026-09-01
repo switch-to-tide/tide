@@ -37,10 +37,13 @@ def char_width(ch):
     o = ord(ch)
     if o < 32 or 0x7F <= o < 0xA0:
         return 0
+    if o < 0x0300:
+        return 1                      # plain ascii and latin-1, the common case
+    if unicodedata.combining(ch) or o == 0x200D:
+        return 0                      # an accent, or the joiner in an emoji:
+                                      # both belong to the character before
     if o < 0x1100:
         return 1
-    if unicodedata.combining(ch):
-        return 0
     return 2 if unicodedata.east_asian_width(ch) in _WIDE else 1
 
 

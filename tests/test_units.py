@@ -428,5 +428,43 @@ class TestScreen(unittest.TestCase):
         self.assertEqual(s.cells[0][1][0], '')
 
 
+class TestCharacterWidths(unittest.TestCase):
+    """What the terminal draws, and what tide thinks it drew."""
+
+    def test_an_accent_belongs_to_the_letter_before_it(self):
+        from tide.term import Screen, text_width
+        self.assertEqual(text_width('e\u0301cole'), 5, 'the accent took a column')
+        self.assertEqual(text_width('cafe\u0301'), 4)
+        screen = Screen(12, 1)
+        screen.put(0, 0, 'e\u0301x')
+        self.assertEqual(screen.cells[1][0] if False else screen.cells[0][1][0],
+                         'x', 'the accent was given a cell of its own')
+
+    def test_wide_and_plain_characters_still_measure_right(self):
+        from tide.term import text_width
+        self.assertEqual(text_width('plain'), 5)
+        self.assertEqual(text_width('\u65e5\u672c\u8a9e'), 6)
+        self.assertEqual(text_width('a\u200db'), 2, 'a joiner took a column')
+
+
+class TestSavingSafely(unittest.TestCase):
+    def test_setuid_is_not_copied_onto_the_new_file(self):
+        import stat as stat_mod
+        import tempfile
+        from tide.buffer import Document
+        folder = tempfile.mkdtemp()
+        path = os.path.join(folder, 'f.txt')
+        with open(path, 'w') as f:
+            f.write('one\n')
+        os.chmod(path, 0o4755)
+        doc = Document(path)
+        doc.insert('x')
+        doc.save()
+        mode = stat_mod.S_IMODE(os.stat(path).st_mode)
+        self.assertFalse(mode & stat_mod.S_ISUID, 'setuid survived the save')
+        self.assertEqual(mode & 0o777, 0o755, 'the rest of the mode was lost')
+        self.assertEqual(open(path).read(), 'xone\n')
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)
